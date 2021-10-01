@@ -1,5 +1,5 @@
 
-(function(l, r) { if (!l || l.getElementById('livereloadscript')) return; r = l.createElement('script'); r.async = 1; r.src = '//' + (self.location.host || 'localhost').split(':')[0] + ':35730/livereload.js?snipver=1'; r.id = 'livereloadscript'; l.getElementsByTagName('head')[0].appendChild(r) })(self.document);
+(function(l, r) { if (!l || l.getElementById('livereloadscript')) return; r = l.createElement('script'); r.async = 1; r.src = '//' + (self.location.host || 'localhost').split(':')[0] + ':35729/livereload.js?snipver=1'; r.id = 'livereloadscript'; l.getElementsByTagName('head')[0].appendChild(r) })(self.document);
 var app = (function () {
     'use strict';
 
@@ -593,6 +593,13 @@ var app = (function () {
         else
             dispatch_dev('SvelteDOMSetAttribute', { node, attribute, value });
     }
+    function set_data_dev(text, data) {
+        data = '' + data;
+        if (text.wholeText === data)
+            return;
+        dispatch_dev('SvelteDOMSetData', { node: text, data });
+        text.data = data;
+    }
     function validate_each_argument(arg) {
         if (typeof arg !== 'string' && !(arg && typeof arg === 'object' && 'length' in arg)) {
             let msg = '{#each} only iterates over array-like objects.';
@@ -667,12 +674,12 @@ var app = (function () {
 
     function get_each_context(ctx, list, i) {
     	const child_ctx = ctx.slice();
-    	child_ctx[2] = list[i];
-    	child_ctx[4] = i;
+    	child_ctx[6] = list[i];
+    	child_ctx[8] = i;
     	return child_ctx;
     }
 
-    // (20:4) {#each Array(num) as _, i}
+    // (68:4) {#each Array(num) as _, i}
     function create_each_block(ctx) {
     	let a;
     	let a_intro;
@@ -684,9 +691,10 @@ var app = (function () {
     			a = element("a");
     			a.textContent = `${emojis[Math.floor(Math.random() * emojis.length)]}`;
     			attr_dev(a, "href", "/");
-    			attr_dev(a, "class", "item svelte-lgd345");
-    			set_style(a, "--col", /*i*/ ctx[4] * 10 + 'deg');
-    			add_location(a, file, 20, 6, 523);
+    			attr_dev(a, "class", "item svelte-ntxkos");
+    			set_style(a, "--col", /*i*/ ctx[8] * 10 + 'deg');
+    			set_style(a, "--index", /*i*/ ctx[8] + 1);
+    			add_location(a, file, 68, 6, 1425);
     		},
     		m: function mount(target, anchor) {
     			insert_dev(target, a, anchor);
@@ -719,7 +727,7 @@ var app = (function () {
     		block,
     		id: create_each_block.name,
     		type: "each",
-    		source: "(20:4) {#each Array(num) as _, i}",
+    		source: "(68:4) {#each Array(num) as _, i}",
     		ctx
     	});
 
@@ -730,9 +738,33 @@ var app = (function () {
     	let main;
     	let h1;
     	let t1;
-    	let input;
-    	let t2;
-    	let div;
+    	let form;
+    	let label0;
+    	let span0;
+    	let t3;
+    	let span1;
+    	let t4;
+    	let t5;
+    	let input0;
+    	let t6;
+    	let label1;
+    	let span2;
+    	let t8;
+    	let span3;
+    	let t9;
+    	let t10;
+    	let t11;
+    	let input1;
+    	let t12;
+    	let label2;
+    	let span4;
+    	let t14;
+    	let span5;
+    	let t15;
+    	let t16;
+    	let input2;
+    	let t17;
+    	let section;
     	let current;
     	let mounted;
     	let dispose;
@@ -754,26 +786,88 @@ var app = (function () {
     			h1 = element("h1");
     			h1.textContent = "CSS Circular";
     			t1 = space();
-    			input = element("input");
-    			t2 = space();
-    			div = element("div");
+    			form = element("form");
+    			label0 = element("label");
+    			span0 = element("span");
+    			span0.textContent = "Items";
+    			t3 = space();
+    			span1 = element("span");
+    			t4 = text(/*num*/ ctx[0]);
+    			t5 = space();
+    			input0 = element("input");
+    			t6 = space();
+    			label1 = element("label");
+    			span2 = element("span");
+    			span2.textContent = "Angle";
+    			t8 = space();
+    			span3 = element("span");
+    			t9 = text(/*angle*/ ctx[1]);
+    			t10 = text("°");
+    			t11 = space();
+    			input1 = element("input");
+    			t12 = space();
+    			label2 = element("label");
+    			span4 = element("span");
+    			span4.textContent = "Radius Scale";
+    			t14 = space();
+    			span5 = element("span");
+    			t15 = text(/*radius*/ ctx[2]);
+    			t16 = space();
+    			input2 = element("input");
+    			t17 = space();
+    			section = element("section");
 
     			for (let i = 0; i < each_blocks.length; i += 1) {
     				each_blocks[i].c();
     			}
 
-    			attr_dev(h1, "class", "svelte-lgd345");
-    			add_location(h1, file, 16, 2, 349);
-    			attr_dev(input, "class", "slider svelte-lgd345");
-    			attr_dev(input, "type", "range");
-    			attr_dev(input, "min", "1");
-    			attr_dev(input, "max", "36");
-    			add_location(input, file, 17, 2, 373);
-    			attr_dev(div, "id", "container");
-    			attr_dev(div, "class", "container svelte-lgd345");
-    			add_location(div, file, 18, 2, 447);
-    			attr_dev(main, "class", "svelte-lgd345");
-    			add_location(main, file, 15, 0, 340);
+    			attr_dev(h1, "class", "svelte-ntxkos");
+    			add_location(h1, file, 18, 2, 384);
+    			add_location(span0, file, 21, 6, 481);
+    			add_location(span1, file, 22, 6, 506);
+    			attr_dev(input0, "class", "slider svelte-ntxkos");
+    			attr_dev(input0, "type", "range");
+    			attr_dev(input0, "name", "number");
+    			attr_dev(input0, "min", "1");
+    			attr_dev(input0, "max", "36");
+    			attr_dev(input0, "step", "1");
+    			add_location(input0, file, 23, 6, 531);
+    			attr_dev(label0, "id", "itemInput");
+    			attr_dev(label0, "class", "control svelte-ntxkos");
+    			add_location(label0, file, 20, 4, 436);
+    			add_location(span2, file, 35, 6, 752);
+    			add_location(span3, file, 36, 6, 777);
+    			attr_dev(input1, "aria-labelledby", "angleInput");
+    			attr_dev(input1, "class", "slider svelte-ntxkos");
+    			attr_dev(input1, "type", "range");
+    			attr_dev(input1, "min", "0");
+    			attr_dev(input1, "max", "360");
+    			attr_dev(input1, "step", "1");
+    			add_location(input1, file, 37, 6, 805);
+    			attr_dev(label1, "id", "angleInput");
+    			attr_dev(label1, "class", "control svelte-ntxkos");
+    			add_location(label1, file, 34, 4, 706);
+    			add_location(span4, file, 49, 6, 1045);
+    			add_location(span5, file, 50, 6, 1077);
+    			attr_dev(input2, "name", "radius");
+    			attr_dev(input2, "class", "slider svelte-ntxkos");
+    			attr_dev(input2, "type", "range");
+    			attr_dev(input2, "min", "0.5");
+    			attr_dev(input2, "max", "2");
+    			attr_dev(input2, "step", "0.1");
+    			add_location(input2, file, 51, 6, 1105);
+    			attr_dev(label2, "id", "radiusInput");
+    			attr_dev(label2, "class", "control svelte-ntxkos");
+    			add_location(label2, file, 48, 4, 998);
+    			attr_dev(form, "class", "controls svelte-ntxkos");
+    			add_location(form, file, 19, 2, 408);
+    			attr_dev(section, "id", "container");
+    			attr_dev(section, "class", "container svelte-ntxkos");
+    			set_style(section, "--a", /*angle*/ ctx[1]);
+    			set_style(section, "--rad", /*radius*/ ctx[2]);
+    			add_location(section, file, 62, 2, 1293);
+    			attr_dev(main, "class", "svelte-ntxkos");
+    			add_location(main, file, 17, 0, 375);
     		},
     		l: function claim(nodes) {
     			throw new Error("options.hydrate only works if the component was compiled with the `hydratable: true` option");
@@ -782,29 +876,73 @@ var app = (function () {
     			insert_dev(target, main, anchor);
     			append_dev(main, h1);
     			append_dev(main, t1);
-    			append_dev(main, input);
-    			set_input_value(input, /*num*/ ctx[0]);
-    			append_dev(main, t2);
-    			append_dev(main, div);
+    			append_dev(main, form);
+    			append_dev(form, label0);
+    			append_dev(label0, span0);
+    			append_dev(label0, t3);
+    			append_dev(label0, span1);
+    			append_dev(span1, t4);
+    			append_dev(label0, t5);
+    			append_dev(label0, input0);
+    			set_input_value(input0, /*num*/ ctx[0]);
+    			append_dev(form, t6);
+    			append_dev(form, label1);
+    			append_dev(label1, span2);
+    			append_dev(label1, t8);
+    			append_dev(label1, span3);
+    			append_dev(span3, t9);
+    			append_dev(span3, t10);
+    			append_dev(label1, t11);
+    			append_dev(label1, input1);
+    			set_input_value(input1, /*angle*/ ctx[1]);
+    			append_dev(form, t12);
+    			append_dev(form, label2);
+    			append_dev(label2, span4);
+    			append_dev(label2, t14);
+    			append_dev(label2, span5);
+    			append_dev(span5, t15);
+    			append_dev(label2, t16);
+    			append_dev(label2, input2);
+    			set_input_value(input2, /*radius*/ ctx[2]);
+    			append_dev(main, t17);
+    			append_dev(main, section);
 
     			for (let i = 0; i < each_blocks.length; i += 1) {
-    				each_blocks[i].m(div, null);
+    				each_blocks[i].m(section, null);
     			}
 
     			current = true;
 
     			if (!mounted) {
     				dispose = [
-    					listen_dev(input, "change", /*input_change_input_handler*/ ctx[1]),
-    					listen_dev(input, "input", /*input_change_input_handler*/ ctx[1])
+    					listen_dev(input0, "change", /*input0_change_input_handler*/ ctx[3]),
+    					listen_dev(input0, "input", /*input0_change_input_handler*/ ctx[3]),
+    					listen_dev(input1, "change", /*input1_change_input_handler*/ ctx[4]),
+    					listen_dev(input1, "input", /*input1_change_input_handler*/ ctx[4]),
+    					listen_dev(input2, "change", /*input2_change_input_handler*/ ctx[5]),
+    					listen_dev(input2, "input", /*input2_change_input_handler*/ ctx[5])
     				];
 
     				mounted = true;
     			}
     		},
     		p: function update(ctx, [dirty]) {
+    			if (!current || dirty & /*num*/ 1) set_data_dev(t4, /*num*/ ctx[0]);
+
     			if (dirty & /*num*/ 1) {
-    				set_input_value(input, /*num*/ ctx[0]);
+    				set_input_value(input0, /*num*/ ctx[0]);
+    			}
+
+    			if (!current || dirty & /*angle*/ 2) set_data_dev(t9, /*angle*/ ctx[1]);
+
+    			if (dirty & /*angle*/ 2) {
+    				set_input_value(input1, /*angle*/ ctx[1]);
+    			}
+
+    			if (!current || dirty & /*radius*/ 4) set_data_dev(t15, /*radius*/ ctx[2]);
+
+    			if (dirty & /*radius*/ 4) {
+    				set_input_value(input2, /*radius*/ ctx[2]);
     			}
 
     			if (dirty & /*emojis, Math, num*/ 1) {
@@ -822,7 +960,7 @@ var app = (function () {
     						each_blocks[i] = create_each_block(child_ctx);
     						each_blocks[i].c();
     						transition_in(each_blocks[i], 1);
-    						each_blocks[i].m(div, null);
+    						each_blocks[i].m(section, null);
     					}
     				}
 
@@ -833,6 +971,14 @@ var app = (function () {
     				}
 
     				check_outros();
+    			}
+
+    			if (!current || dirty & /*angle*/ 2) {
+    				set_style(section, "--a", /*angle*/ ctx[1]);
+    			}
+
+    			if (!current || dirty & /*radius*/ 4) {
+    				set_style(section, "--rad", /*radius*/ ctx[2]);
     			}
     		},
     		i: function intro(local) {
@@ -886,28 +1032,57 @@ var app = (function () {
 
     	init();
     	let num = 36;
+    	let angle = 0;
+    	let radius = 1;
     	const writable_props = [];
 
     	Object.keys($$props).forEach(key => {
     		if (!~writable_props.indexOf(key) && key.slice(0, 2) !== '$$' && key !== 'slot') console.warn(`<App> was created with unknown prop '${key}'`);
     	});
 
-    	function input_change_input_handler() {
+    	function input0_change_input_handler() {
     		num = to_number(this.value);
     		$$invalidate(0, num);
     	}
 
-    	$$self.$capture_state = () => ({ fade, fly, emojis, init, num });
+    	function input1_change_input_handler() {
+    		angle = to_number(this.value);
+    		$$invalidate(1, angle);
+    	}
+
+    	function input2_change_input_handler() {
+    		radius = to_number(this.value);
+    		$$invalidate(2, radius);
+    	}
+
+    	$$self.$capture_state = () => ({
+    		fade,
+    		fly,
+    		emojis,
+    		init,
+    		num,
+    		angle,
+    		radius
+    	});
 
     	$$self.$inject_state = $$props => {
     		if ('num' in $$props) $$invalidate(0, num = $$props.num);
+    		if ('angle' in $$props) $$invalidate(1, angle = $$props.angle);
+    		if ('radius' in $$props) $$invalidate(2, radius = $$props.radius);
     	};
 
     	if ($$props && "$$inject" in $$props) {
     		$$self.$inject_state($$props.$$inject);
     	}
 
-    	return [num, input_change_input_handler];
+    	return [
+    		num,
+    		angle,
+    		radius,
+    		input0_change_input_handler,
+    		input1_change_input_handler,
+    		input2_change_input_handler
+    	];
     }
 
     class App extends SvelteComponentDev {
