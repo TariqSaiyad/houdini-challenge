@@ -213,6 +213,9 @@ var app = (function () {
     function add_render_callback(fn) {
         render_callbacks.push(fn);
     }
+    function add_flush_callback(fn) {
+        flush_callbacks.push(fn);
+    }
     let flushing = false;
     const seen_callbacks = new Set();
     function flush() {
@@ -431,6 +434,17 @@ var app = (function () {
                 }
             }
         };
+    }
+
+    function bind(component, name, callback) {
+        const index = component.$$.props[name];
+        if (index !== undefined) {
+            component.$$.bound[index] = callback;
+            callback(component.$$.ctx[index]);
+        }
+    }
+    function create_component(block) {
+        block && block.c();
     }
     function mount_component(component, target, anchor, customElement) {
         const { fragment, on_mount, on_destroy, after_update } = component.$$;
@@ -669,6 +683,261 @@ var app = (function () {
     	'😄','😃','😀','😊','☺','😉','😍','😘','😚','😗','😙','😜','😝','😛','😳','😁','😔','😌','😒','😞','😣','😢','😂','😭','😪','😥','😰','😅','😓','😩','😫','😨','😱','😠','😡','😤','😖','😆','😋','😷','😎','😴','😵','😲','😟','😦','😧','😈','👿','😮','😬','😐','😕','😯','😶','😇','😏','😑','👲','👳','👮','👷','💂','👶','👦','👧','👨','👩','👴','👵','👱','👼','👸','😺','😸','😻','😽','😼','🙀','😿','😹','😾','👹','👺','🙈','🙉','🙊','💀','👽','💩','🔥','✨','🌟','💫','💥','💢','💦','💧','💤','💨','👂','👀','👃','👅','👄','👍','👎','👌','👊','✊','✌','👋','✋','👐','👆','👇','👉','👈','🙌','🙏','☝','👏','💪','🚶','🏃','💃','👫','👪','👬','👭','💏','💑','👯','🙆','🙅','💁','🙋','💆','💇','💅','👰','🙎','🙍','🙇','🎩','👑','👒','👟','👞','👡','👠','👢','👕','👔','👚','👗','🎽','👖','👘','👙','💼','👜','👝','👛','👓','🎀','🌂','💄','💛','💙','💜','💚','❤','💔','💗','💓','💕','💖','💞','💘','💌','💋','💍','💎','👤','👥','💬','👣','💭','🐶','🐺','🐱','🐭','🐹','🐰','🐸','🐯','🐨','🐻','🐷','🐽','🐮','🐗','🐵','🐒','🐴','🐑','🐘','🐼','🐧','🐦','🐤','🐥','🐣','🐔','🐍','🐢','🐛','🐝','🐜','🐞','🐌','🐙','🐚','🐠','🐟','🐬','🐳','🐋','🐄','🐏','🐀','🐃','🐅','🐇','🐉','🐎','🐐','🐓','🐕','🐖','🐁','🐂','🐲','🐡','🐊','🐫','🐪','🐆','🐈','🐩','🐾','💐','🌸','🌷','🍀','🌹','🌻','🌺','🍁','🍃','🍂','🌿','🌾','🍄','🌵','🌴','🌲','🌳','🌰','🌱','🌼','🌐','🌞','🌝','🌚','🌑','🌒','🌓','🌔','🌕','🌖','🌗','🌘','🌜','🌛','🌙','🌍','🌎','🌏','🌋','🌌','🌠','⭐','☀','⛅','☁','⚡','☔','❄','⛄','🌀','🌁','🌈','🌊','🎍','💝','🎎','🎒','🎓','🎏','🎆','🎇','🎐','🎑','🎃','👻','🎅','🎄','🎁','🎋','🎉','🎊','🎈','🎌','🔮','🎥','📷','📹','📼','💿','📀','💽','💾','💻','📱','☎','📞','📟','📠','📡','📺','📻','🔊','🔉','🔈','🔇','🔔','🔕','📢','📣','⏳','⌛','⏰','⌚','🔓','🔒','🔏','🔐','🔑','🔎','💡','🔦','🔆','🔅','🔌','🔋','🔍','🛁','🛀','🚿','🚽','🔧','🔩','🔨','🚪','🚬','💣','🔫','🔪','💊','💉','💰','💴','💵','💷','💶','💳','💸','📲','📧','📥','📤','✉','📩','📨','📯','📫','📪','📬','📭','📮','📦','📝','📄','📃','📑','📊','📈','📉','📜','📋','📅','📆','📇','📁','📂','✂','📌','📎','✒','✏','📏','📐','📕','📗','📘','📙','📓','📔','📒','📚','📖','🔖','📛','🔬','🔭','📰','🎨','🎬','🎤','🎧','🎼','🎵','🎶','🎹','🎻','🎺','🎷','🎸','👾','🎮','🃏','🎴','🀄','🎲','🎯','🏈','🏀','⚽','⚾','🎾','🎱','🏉','🎳','⛳','🚵','🚴','🏁','🏇','🏆','🎿','🏂','🏊','🏄','🎣','☕','🍵','🍶','🍼','🍺','🍻','🍸','🍹','🍷','🍴','🍕','🍔','🍟','🍗','🍖','🍝','🍛','🍤','🍱','🍣','🍥','🍙','🍘','🍚','🍜','🍲','🍢','🍡','🍳','🍞','🍩','🍮','🍦','🍨','🍧','🎂','🍰','🍪','🍫','🍬','🍭','🍯','🍎','🍏','🍊','🍋','🍒','🍇','🍉','🍓','🍑','🍈','🍌','🍐','🍍','🍠','🍆','🍅','🌽','🏠','🏡','🏫','🏢','🏣','🏥','🏦','🏪','🏩','🏨','💒','⛪','🏬','🏤','🌇','🌆','🏯','🏰','⛺','🏭','🗼','🗾','🗻','🌄','🌅','🌃','🗽','🌉','🎠','🎡','⛲','🎢','🚢','⛵','🚤','🚣','⚓','🚀','✈','💺','🚁','🚂','🚊','🚉','🚞','🚆','🚄','🚅','🚈','🚇','🚝','🚋','🚃','🚎','🚌','🚍','🚙','🚘','🚗','🚕','🚖','🚛','🚚','🚨','🚓','🚔','🚒','🚑','🚐','🚲','🚡','🚟','🚠','🚜','💈','🚏','🎫','🚦','🚥','⚠','🚧','🔰','⛽','🏮','🎰','♨','🗿','🎪','🎭','📍','🚩','⬆','⬇','⬅','➡','🔠','🔡','🔤','↗','↖','↘','↙','↔','↕','🔄','◀','▶','🔼','🔽','↩','↪','ℹ','⏪','⏩','⏫','⏬','⤵','⤴','🆗','🔀','🔁','🔂','🆕','🆙','🆒','🆓','🆖','📶','🎦','🈁','🈯','🈳','🈵','🈴','🈲','🉐','🈹','🈺','🈶','🈚','🚻','🚹','🚺','🚼','🚾','🚰','🚮','🅿','♿','🚭','🈷','🈸','🈂','Ⓜ','🛂','🛄','🛅','🛃','🉑','㊙','㊗','🆑','🆘','🆔','🚫','🔞','📵','🚯','🚱','🚳','🚷','🚸','⛔','✳','❇','❎','✅','✴','💟','🆚','📳','📴','🅰','🅱','🆎','🅾','💠','➿','♻','♈','♉','♊','♋','♌','♍','♎','♏','♐','♑','♒','♓','⛎','🔯','🏧','💹','💲','💱','©','®','™','〽','〰','🔝','🔚','🔙','🔛','🔜','❌','⭕','❗','❓','❕','❔','🔃','🕛','🕧','🕐','🕜','🕑','🕝','🕒','🕞','🕓','🕟','🕔','🕠','🕕','🕖','🕗','🕘','🕙','🕚','🕡','🕢','🕣','🕤','🕥','🕦','✖','➕','➖','➗','♠','♥','♣','♦','💮','💯','✔','☑','🔘','🔗','➰','🔱','🔲','🔳','◼','◻','◾','◽','▪','▫','🔺','⬜','⬛','⚫','⚪','🔴','🔵','🔻','🔶','🔷','🔸','🔹'
     ];
 
+    /* src/components/Slider.svelte generated by Svelte v3.43.0 */
+
+    const file$1 = "src/components/Slider.svelte";
+
+    function create_fragment$1(ctx) {
+    	let label;
+    	let span0;
+    	let t0;
+    	let t1;
+    	let span1;
+    	let t2;
+    	let t3_value = (/*name*/ ctx[2] === "Angle" ? "°" : "") + "";
+    	let t3;
+    	let t4;
+    	let input;
+    	let mounted;
+    	let dispose;
+
+    	const block = {
+    		c: function create() {
+    			label = element("label");
+    			span0 = element("span");
+    			t0 = text(/*name*/ ctx[2]);
+    			t1 = space();
+    			span1 = element("span");
+    			t2 = text(/*value*/ ctx[0]);
+    			t3 = text(t3_value);
+    			t4 = space();
+    			input = element("input");
+    			add_location(span0, file$1, 5, 2, 97);
+    			attr_dev(span1, "class", "value svelte-1ss4wv0");
+    			add_location(span1, file$1, 6, 2, 119);
+    			attr_dev(input, "aria-labelledby", /*id*/ ctx[1]);
+    			attr_dev(input, "class", "slider svelte-1ss4wv0");
+    			attr_dev(input, "type", "range");
+    			attr_dev(input, "min", /*min*/ ctx[3]);
+    			attr_dev(input, "max", /*max*/ ctx[4]);
+    			attr_dev(input, "step", /*step*/ ctx[5]);
+    			add_location(input, file$1, 7, 2, 186);
+    			attr_dev(label, "id", /*id*/ ctx[1]);
+    			attr_dev(label, "class", "control svelte-1ss4wv0");
+    			add_location(label, file$1, 4, 0, 66);
+    		},
+    		l: function claim(nodes) {
+    			throw new Error("options.hydrate only works if the component was compiled with the `hydratable: true` option");
+    		},
+    		m: function mount(target, anchor) {
+    			insert_dev(target, label, anchor);
+    			append_dev(label, span0);
+    			append_dev(span0, t0);
+    			append_dev(label, t1);
+    			append_dev(label, span1);
+    			append_dev(span1, t2);
+    			append_dev(span1, t3);
+    			append_dev(label, t4);
+    			append_dev(label, input);
+    			set_input_value(input, /*value*/ ctx[0]);
+
+    			if (!mounted) {
+    				dispose = [
+    					listen_dev(input, "change", /*input_change_input_handler*/ ctx[6]),
+    					listen_dev(input, "input", /*input_change_input_handler*/ ctx[6])
+    				];
+
+    				mounted = true;
+    			}
+    		},
+    		p: function update(ctx, [dirty]) {
+    			if (dirty & /*name*/ 4) set_data_dev(t0, /*name*/ ctx[2]);
+    			if (dirty & /*value*/ 1) set_data_dev(t2, /*value*/ ctx[0]);
+    			if (dirty & /*name*/ 4 && t3_value !== (t3_value = (/*name*/ ctx[2] === "Angle" ? "°" : "") + "")) set_data_dev(t3, t3_value);
+
+    			if (dirty & /*id*/ 2) {
+    				attr_dev(input, "aria-labelledby", /*id*/ ctx[1]);
+    			}
+
+    			if (dirty & /*min*/ 8) {
+    				attr_dev(input, "min", /*min*/ ctx[3]);
+    			}
+
+    			if (dirty & /*max*/ 16) {
+    				attr_dev(input, "max", /*max*/ ctx[4]);
+    			}
+
+    			if (dirty & /*step*/ 32) {
+    				attr_dev(input, "step", /*step*/ ctx[5]);
+    			}
+
+    			if (dirty & /*value*/ 1) {
+    				set_input_value(input, /*value*/ ctx[0]);
+    			}
+
+    			if (dirty & /*id*/ 2) {
+    				attr_dev(label, "id", /*id*/ ctx[1]);
+    			}
+    		},
+    		i: noop,
+    		o: noop,
+    		d: function destroy(detaching) {
+    			if (detaching) detach_dev(label);
+    			mounted = false;
+    			run_all(dispose);
+    		}
+    	};
+
+    	dispatch_dev("SvelteRegisterBlock", {
+    		block,
+    		id: create_fragment$1.name,
+    		type: "component",
+    		source: "",
+    		ctx
+    	});
+
+    	return block;
+    }
+
+    function instance$1($$self, $$props, $$invalidate) {
+    	let { $$slots: slots = {}, $$scope } = $$props;
+    	validate_slots('Slider', slots, []);
+    	let { id, name, min, max, step, value } = $$props;
+    	const writable_props = ['id', 'name', 'min', 'max', 'step', 'value'];
+
+    	Object.keys($$props).forEach(key => {
+    		if (!~writable_props.indexOf(key) && key.slice(0, 2) !== '$$' && key !== 'slot') console.warn(`<Slider> was created with unknown prop '${key}'`);
+    	});
+
+    	function input_change_input_handler() {
+    		value = to_number(this.value);
+    		$$invalidate(0, value);
+    	}
+
+    	$$self.$$set = $$props => {
+    		if ('id' in $$props) $$invalidate(1, id = $$props.id);
+    		if ('name' in $$props) $$invalidate(2, name = $$props.name);
+    		if ('min' in $$props) $$invalidate(3, min = $$props.min);
+    		if ('max' in $$props) $$invalidate(4, max = $$props.max);
+    		if ('step' in $$props) $$invalidate(5, step = $$props.step);
+    		if ('value' in $$props) $$invalidate(0, value = $$props.value);
+    	};
+
+    	$$self.$capture_state = () => ({ id, name, min, max, step, value });
+
+    	$$self.$inject_state = $$props => {
+    		if ('id' in $$props) $$invalidate(1, id = $$props.id);
+    		if ('name' in $$props) $$invalidate(2, name = $$props.name);
+    		if ('min' in $$props) $$invalidate(3, min = $$props.min);
+    		if ('max' in $$props) $$invalidate(4, max = $$props.max);
+    		if ('step' in $$props) $$invalidate(5, step = $$props.step);
+    		if ('value' in $$props) $$invalidate(0, value = $$props.value);
+    	};
+
+    	if ($$props && "$$inject" in $$props) {
+    		$$self.$inject_state($$props.$$inject);
+    	}
+
+    	return [value, id, name, min, max, step, input_change_input_handler];
+    }
+
+    class Slider extends SvelteComponentDev {
+    	constructor(options) {
+    		super(options);
+
+    		init$1(this, options, instance$1, create_fragment$1, safe_not_equal, {
+    			id: 1,
+    			name: 2,
+    			min: 3,
+    			max: 4,
+    			step: 5,
+    			value: 0
+    		});
+
+    		dispatch_dev("SvelteRegisterComponent", {
+    			component: this,
+    			tagName: "Slider",
+    			options,
+    			id: create_fragment$1.name
+    		});
+
+    		const { ctx } = this.$$;
+    		const props = options.props || {};
+
+    		if (/*id*/ ctx[1] === undefined && !('id' in props)) {
+    			console.warn("<Slider> was created without expected prop 'id'");
+    		}
+
+    		if (/*name*/ ctx[2] === undefined && !('name' in props)) {
+    			console.warn("<Slider> was created without expected prop 'name'");
+    		}
+
+    		if (/*min*/ ctx[3] === undefined && !('min' in props)) {
+    			console.warn("<Slider> was created without expected prop 'min'");
+    		}
+
+    		if (/*max*/ ctx[4] === undefined && !('max' in props)) {
+    			console.warn("<Slider> was created without expected prop 'max'");
+    		}
+
+    		if (/*step*/ ctx[5] === undefined && !('step' in props)) {
+    			console.warn("<Slider> was created without expected prop 'step'");
+    		}
+
+    		if (/*value*/ ctx[0] === undefined && !('value' in props)) {
+    			console.warn("<Slider> was created without expected prop 'value'");
+    		}
+    	}
+
+    	get id() {
+    		throw new Error("<Slider>: Props cannot be read directly from the component instance unless compiling with 'accessors: true' or '<svelte:options accessors/>'");
+    	}
+
+    	set id(value) {
+    		throw new Error("<Slider>: Props cannot be set directly on the component instance unless compiling with 'accessors: true' or '<svelte:options accessors/>'");
+    	}
+
+    	get name() {
+    		throw new Error("<Slider>: Props cannot be read directly from the component instance unless compiling with 'accessors: true' or '<svelte:options accessors/>'");
+    	}
+
+    	set name(value) {
+    		throw new Error("<Slider>: Props cannot be set directly on the component instance unless compiling with 'accessors: true' or '<svelte:options accessors/>'");
+    	}
+
+    	get min() {
+    		throw new Error("<Slider>: Props cannot be read directly from the component instance unless compiling with 'accessors: true' or '<svelte:options accessors/>'");
+    	}
+
+    	set min(value) {
+    		throw new Error("<Slider>: Props cannot be set directly on the component instance unless compiling with 'accessors: true' or '<svelte:options accessors/>'");
+    	}
+
+    	get max() {
+    		throw new Error("<Slider>: Props cannot be read directly from the component instance unless compiling with 'accessors: true' or '<svelte:options accessors/>'");
+    	}
+
+    	set max(value) {
+    		throw new Error("<Slider>: Props cannot be set directly on the component instance unless compiling with 'accessors: true' or '<svelte:options accessors/>'");
+    	}
+
+    	get step() {
+    		throw new Error("<Slider>: Props cannot be read directly from the component instance unless compiling with 'accessors: true' or '<svelte:options accessors/>'");
+    	}
+
+    	set step(value) {
+    		throw new Error("<Slider>: Props cannot be set directly on the component instance unless compiling with 'accessors: true' or '<svelte:options accessors/>'");
+    	}
+
+    	get value() {
+    		throw new Error("<Slider>: Props cannot be read directly from the component instance unless compiling with 'accessors: true' or '<svelte:options accessors/>'");
+    	}
+
+    	set value(value) {
+    		throw new Error("<Slider>: Props cannot be set directly on the component instance unless compiling with 'accessors: true' or '<svelte:options accessors/>'");
+    	}
+    }
+
     /* src/App.svelte generated by Svelte v3.43.0 */
     const file = "src/App.svelte";
 
@@ -679,7 +948,7 @@ var app = (function () {
     	return child_ctx;
     }
 
-    // (68:4) {#each Array(num) as _, i}
+    // (52:4) {#each Array(num) as _, i}
     function create_each_block(ctx) {
     	let a;
     	let a_intro;
@@ -691,10 +960,10 @@ var app = (function () {
     			a = element("a");
     			a.textContent = `${emojis[Math.floor(Math.random() * emojis.length)]}`;
     			attr_dev(a, "href", "/");
-    			attr_dev(a, "class", "item svelte-ntxkos");
+    			attr_dev(a, "class", "item svelte-1l9u712");
     			set_style(a, "--col", /*i*/ ctx[8] * 10 + 'deg');
     			set_style(a, "--index", /*i*/ ctx[8] + 1);
-    			add_location(a, file, 68, 6, 1425);
+    			add_location(a, file, 52, 6, 1024);
     		},
     		m: function mount(target, anchor) {
     			insert_dev(target, a, anchor);
@@ -727,7 +996,7 @@ var app = (function () {
     		block,
     		id: create_each_block.name,
     		type: "each",
-    		source: "(68:4) {#each Array(num) as _, i}",
+    		source: "(52:4) {#each Array(num) as _, i}",
     		ctx
     	});
 
@@ -739,35 +1008,74 @@ var app = (function () {
     	let h1;
     	let t1;
     	let form;
-    	let label0;
-    	let span0;
+    	let slider0;
+    	let updating_value;
+    	let t2;
+    	let slider1;
+    	let updating_value_1;
     	let t3;
-    	let span1;
+    	let slider2;
+    	let updating_value_2;
     	let t4;
-    	let t5;
-    	let input0;
-    	let t6;
-    	let label1;
-    	let span2;
-    	let t8;
-    	let span3;
-    	let t9;
-    	let t10;
-    	let t11;
-    	let input1;
-    	let t12;
-    	let label2;
-    	let span4;
-    	let t14;
-    	let span5;
-    	let t15;
-    	let t16;
-    	let input2;
-    	let t17;
     	let section;
     	let current;
-    	let mounted;
-    	let dispose;
+
+    	function slider0_value_binding(value) {
+    		/*slider0_value_binding*/ ctx[3](value);
+    	}
+
+    	let slider0_props = {
+    		id: "itemInput",
+    		name: "Items",
+    		min: "1",
+    		max: "36",
+    		step: "1"
+    	};
+
+    	if (/*num*/ ctx[0] !== void 0) {
+    		slider0_props.value = /*num*/ ctx[0];
+    	}
+
+    	slider0 = new Slider({ props: slider0_props, $$inline: true });
+    	binding_callbacks.push(() => bind(slider0, 'value', slider0_value_binding));
+
+    	function slider1_value_binding(value) {
+    		/*slider1_value_binding*/ ctx[4](value);
+    	}
+
+    	let slider1_props = {
+    		id: "angleInput",
+    		name: "Angle",
+    		min: "0",
+    		max: "360",
+    		step: "1"
+    	};
+
+    	if (/*angle*/ ctx[1] !== void 0) {
+    		slider1_props.value = /*angle*/ ctx[1];
+    	}
+
+    	slider1 = new Slider({ props: slider1_props, $$inline: true });
+    	binding_callbacks.push(() => bind(slider1, 'value', slider1_value_binding));
+
+    	function slider2_value_binding(value) {
+    		/*slider2_value_binding*/ ctx[5](value);
+    	}
+
+    	let slider2_props = {
+    		id: "radiusInput",
+    		name: "Radius Scale",
+    		min: "0.5",
+    		max: "2",
+    		step: "0.1"
+    	};
+
+    	if (/*radius*/ ctx[2] !== void 0) {
+    		slider2_props.value = /*radius*/ ctx[2];
+    	}
+
+    	slider2 = new Slider({ props: slider2_props, $$inline: true });
+    	binding_callbacks.push(() => bind(slider2, 'value', slider2_value_binding));
     	let each_value = Array(/*num*/ ctx[0]);
     	validate_each_argument(each_value);
     	let each_blocks = [];
@@ -787,87 +1095,29 @@ var app = (function () {
     			h1.textContent = "CSS Circular";
     			t1 = space();
     			form = element("form");
-    			label0 = element("label");
-    			span0 = element("span");
-    			span0.textContent = "Items";
+    			create_component(slider0.$$.fragment);
+    			t2 = space();
+    			create_component(slider1.$$.fragment);
     			t3 = space();
-    			span1 = element("span");
-    			t4 = text(/*num*/ ctx[0]);
-    			t5 = space();
-    			input0 = element("input");
-    			t6 = space();
-    			label1 = element("label");
-    			span2 = element("span");
-    			span2.textContent = "Angle";
-    			t8 = space();
-    			span3 = element("span");
-    			t9 = text(/*angle*/ ctx[1]);
-    			t10 = text("°");
-    			t11 = space();
-    			input1 = element("input");
-    			t12 = space();
-    			label2 = element("label");
-    			span4 = element("span");
-    			span4.textContent = "Radius Scale";
-    			t14 = space();
-    			span5 = element("span");
-    			t15 = text(/*radius*/ ctx[2]);
-    			t16 = space();
-    			input2 = element("input");
-    			t17 = space();
+    			create_component(slider2.$$.fragment);
+    			t4 = space();
     			section = element("section");
 
     			for (let i = 0; i < each_blocks.length; i += 1) {
     				each_blocks[i].c();
     			}
 
-    			attr_dev(h1, "class", "svelte-ntxkos");
-    			add_location(h1, file, 18, 2, 384);
-    			add_location(span0, file, 21, 6, 481);
-    			add_location(span1, file, 22, 6, 506);
-    			attr_dev(input0, "class", "slider svelte-ntxkos");
-    			attr_dev(input0, "type", "range");
-    			attr_dev(input0, "name", "number");
-    			attr_dev(input0, "min", "1");
-    			attr_dev(input0, "max", "36");
-    			attr_dev(input0, "step", "1");
-    			add_location(input0, file, 23, 6, 531);
-    			attr_dev(label0, "id", "itemInput");
-    			attr_dev(label0, "class", "control svelte-ntxkos");
-    			add_location(label0, file, 20, 4, 436);
-    			add_location(span2, file, 35, 6, 752);
-    			add_location(span3, file, 36, 6, 777);
-    			attr_dev(input1, "aria-labelledby", "angleInput");
-    			attr_dev(input1, "class", "slider svelte-ntxkos");
-    			attr_dev(input1, "type", "range");
-    			attr_dev(input1, "min", "0");
-    			attr_dev(input1, "max", "360");
-    			attr_dev(input1, "step", "1");
-    			add_location(input1, file, 37, 6, 805);
-    			attr_dev(label1, "id", "angleInput");
-    			attr_dev(label1, "class", "control svelte-ntxkos");
-    			add_location(label1, file, 34, 4, 706);
-    			add_location(span4, file, 49, 6, 1045);
-    			add_location(span5, file, 50, 6, 1077);
-    			attr_dev(input2, "name", "radius");
-    			attr_dev(input2, "class", "slider svelte-ntxkos");
-    			attr_dev(input2, "type", "range");
-    			attr_dev(input2, "min", "0.5");
-    			attr_dev(input2, "max", "2");
-    			attr_dev(input2, "step", "0.1");
-    			add_location(input2, file, 51, 6, 1105);
-    			attr_dev(label2, "id", "radiusInput");
-    			attr_dev(label2, "class", "control svelte-ntxkos");
-    			add_location(label2, file, 48, 4, 998);
-    			attr_dev(form, "class", "controls svelte-ntxkos");
-    			add_location(form, file, 19, 2, 408);
+    			attr_dev(h1, "class", "svelte-1l9u712");
+    			add_location(h1, file, 19, 2, 435);
+    			attr_dev(form, "class", "controls svelte-1l9u712");
+    			add_location(form, file, 20, 2, 459);
     			attr_dev(section, "id", "container");
-    			attr_dev(section, "class", "container svelte-ntxkos");
+    			attr_dev(section, "class", "container svelte-1l9u712");
     			set_style(section, "--a", /*angle*/ ctx[1]);
     			set_style(section, "--rad", /*radius*/ ctx[2]);
-    			add_location(section, file, 62, 2, 1293);
-    			attr_dev(main, "class", "svelte-ntxkos");
-    			add_location(main, file, 17, 0, 375);
+    			add_location(section, file, 46, 2, 892);
+    			attr_dev(main, "class", "svelte-1l9u712");
+    			add_location(main, file, 18, 0, 426);
     		},
     		l: function claim(nodes) {
     			throw new Error("options.hydrate only works if the component was compiled with the `hydratable: true` option");
@@ -877,34 +1127,12 @@ var app = (function () {
     			append_dev(main, h1);
     			append_dev(main, t1);
     			append_dev(main, form);
-    			append_dev(form, label0);
-    			append_dev(label0, span0);
-    			append_dev(label0, t3);
-    			append_dev(label0, span1);
-    			append_dev(span1, t4);
-    			append_dev(label0, t5);
-    			append_dev(label0, input0);
-    			set_input_value(input0, /*num*/ ctx[0]);
-    			append_dev(form, t6);
-    			append_dev(form, label1);
-    			append_dev(label1, span2);
-    			append_dev(label1, t8);
-    			append_dev(label1, span3);
-    			append_dev(span3, t9);
-    			append_dev(span3, t10);
-    			append_dev(label1, t11);
-    			append_dev(label1, input1);
-    			set_input_value(input1, /*angle*/ ctx[1]);
-    			append_dev(form, t12);
-    			append_dev(form, label2);
-    			append_dev(label2, span4);
-    			append_dev(label2, t14);
-    			append_dev(label2, span5);
-    			append_dev(span5, t15);
-    			append_dev(label2, t16);
-    			append_dev(label2, input2);
-    			set_input_value(input2, /*radius*/ ctx[2]);
-    			append_dev(main, t17);
+    			mount_component(slider0, form, null);
+    			append_dev(form, t2);
+    			mount_component(slider1, form, null);
+    			append_dev(form, t3);
+    			mount_component(slider2, form, null);
+    			append_dev(main, t4);
     			append_dev(main, section);
 
     			for (let i = 0; i < each_blocks.length; i += 1) {
@@ -912,38 +1140,35 @@ var app = (function () {
     			}
 
     			current = true;
-
-    			if (!mounted) {
-    				dispose = [
-    					listen_dev(input0, "change", /*input0_change_input_handler*/ ctx[3]),
-    					listen_dev(input0, "input", /*input0_change_input_handler*/ ctx[3]),
-    					listen_dev(input1, "change", /*input1_change_input_handler*/ ctx[4]),
-    					listen_dev(input1, "input", /*input1_change_input_handler*/ ctx[4]),
-    					listen_dev(input2, "change", /*input2_change_input_handler*/ ctx[5]),
-    					listen_dev(input2, "input", /*input2_change_input_handler*/ ctx[5])
-    				];
-
-    				mounted = true;
-    			}
     		},
     		p: function update(ctx, [dirty]) {
-    			if (!current || dirty & /*num*/ 1) set_data_dev(t4, /*num*/ ctx[0]);
+    			const slider0_changes = {};
 
-    			if (dirty & /*num*/ 1) {
-    				set_input_value(input0, /*num*/ ctx[0]);
+    			if (!updating_value && dirty & /*num*/ 1) {
+    				updating_value = true;
+    				slider0_changes.value = /*num*/ ctx[0];
+    				add_flush_callback(() => updating_value = false);
     			}
 
-    			if (!current || dirty & /*angle*/ 2) set_data_dev(t9, /*angle*/ ctx[1]);
+    			slider0.$set(slider0_changes);
+    			const slider1_changes = {};
 
-    			if (dirty & /*angle*/ 2) {
-    				set_input_value(input1, /*angle*/ ctx[1]);
+    			if (!updating_value_1 && dirty & /*angle*/ 2) {
+    				updating_value_1 = true;
+    				slider1_changes.value = /*angle*/ ctx[1];
+    				add_flush_callback(() => updating_value_1 = false);
     			}
 
-    			if (!current || dirty & /*radius*/ 4) set_data_dev(t15, /*radius*/ ctx[2]);
+    			slider1.$set(slider1_changes);
+    			const slider2_changes = {};
 
-    			if (dirty & /*radius*/ 4) {
-    				set_input_value(input2, /*radius*/ ctx[2]);
+    			if (!updating_value_2 && dirty & /*radius*/ 4) {
+    				updating_value_2 = true;
+    				slider2_changes.value = /*radius*/ ctx[2];
+    				add_flush_callback(() => updating_value_2 = false);
     			}
+
+    			slider2.$set(slider2_changes);
 
     			if (dirty & /*emojis, Math, num*/ 1) {
     				each_value = Array(/*num*/ ctx[0]);
@@ -983,6 +1208,9 @@ var app = (function () {
     		},
     		i: function intro(local) {
     			if (current) return;
+    			transition_in(slider0.$$.fragment, local);
+    			transition_in(slider1.$$.fragment, local);
+    			transition_in(slider2.$$.fragment, local);
 
     			for (let i = 0; i < each_value.length; i += 1) {
     				transition_in(each_blocks[i]);
@@ -991,6 +1219,9 @@ var app = (function () {
     			current = true;
     		},
     		o: function outro(local) {
+    			transition_out(slider0.$$.fragment, local);
+    			transition_out(slider1.$$.fragment, local);
+    			transition_out(slider2.$$.fragment, local);
     			each_blocks = each_blocks.filter(Boolean);
 
     			for (let i = 0; i < each_blocks.length; i += 1) {
@@ -1001,9 +1232,10 @@ var app = (function () {
     		},
     		d: function destroy(detaching) {
     			if (detaching) detach_dev(main);
+    			destroy_component(slider0);
+    			destroy_component(slider1);
+    			destroy_component(slider2);
     			destroy_each(each_blocks, detaching);
-    			mounted = false;
-    			run_all(dispose);
     		}
     	};
 
@@ -1040,18 +1272,18 @@ var app = (function () {
     		if (!~writable_props.indexOf(key) && key.slice(0, 2) !== '$$' && key !== 'slot') console.warn(`<App> was created with unknown prop '${key}'`);
     	});
 
-    	function input0_change_input_handler() {
-    		num = to_number(this.value);
+    	function slider0_value_binding(value) {
+    		num = value;
     		$$invalidate(0, num);
     	}
 
-    	function input1_change_input_handler() {
-    		angle = to_number(this.value);
+    	function slider1_value_binding(value) {
+    		angle = value;
     		$$invalidate(1, angle);
     	}
 
-    	function input2_change_input_handler() {
-    		radius = to_number(this.value);
+    	function slider2_value_binding(value) {
+    		radius = value;
     		$$invalidate(2, radius);
     	}
 
@@ -1059,6 +1291,7 @@ var app = (function () {
     		fade,
     		fly,
     		emojis,
+    		Slider,
     		init,
     		num,
     		angle,
@@ -1079,9 +1312,9 @@ var app = (function () {
     		num,
     		angle,
     		radius,
-    		input0_change_input_handler,
-    		input1_change_input_handler,
-    		input2_change_input_handler
+    		slider0_value_binding,
+    		slider1_value_binding,
+    		slider2_value_binding
     	];
     }
 

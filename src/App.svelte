@@ -1,6 +1,7 @@
 <script>
   import { fade, fly } from "svelte/transition";
   import { emojis } from "./constants.js";
+  import Slider from "./components/Slider.svelte";
 
   if (!CSS.layoutWorklet) {
     document.body.innerHTML("LayoutWorklet not supported by this browser");
@@ -18,47 +19,30 @@
 <main>
   <h1>CSS Circular</h1>
   <form class="controls">
-    <label id="itemInput" class="control">
-      <span>Items</span>
-      <span>{num}</span>
-      <input
-        class="slider"
-        type="range"
-        name="number"
-        min="1"
-        max="36"
-        step="1"
-        bind:value={num}
-      />
-    </label>
-
-    <label id="angleInput" class="control">
-      <span>Angle</span>
-      <span>{angle}°</span>
-      <input
-        aria-labelledby="angleInput"
-        class="slider"
-        type="range"
-        min="0"
-        max="360"
-        step="1"
-        bind:value={angle}
-      />
-    </label>
-
-    <label id="radiusInput" class="control">
-      <span>Radius Scale</span>
-      <span>{radius}</span>
-      <input
-        name="radius"
-        class="slider"
-        type="range"
-        min="0.5"
-        max="2"
-        step="0.1"
-        bind:value={radius}
-      />
-    </label>
+    <Slider
+      id="itemInput"
+      name="Items"
+      min="1"
+      max="36"
+      step="1"
+      bind:value={num}
+    />
+    <Slider
+      id="angleInput"
+      name="Angle"
+      min="0"
+      max="360"
+      step="1"
+      bind:value={angle}
+    />
+    <Slider
+      id="radiusInput"
+      name="Radius Scale"
+      min="0.5"
+      max="2"
+      step="0.1"
+      bind:value={radius}
+    />
   </form>
   <section
     id="container"
@@ -139,33 +123,6 @@
     gap: 0.5rem;
     padding: 0rem 1rem 3rem;
   }
-
-  .control{
-    display: grid;
-    gap: 0.5rem;
-    grid-template-columns: 1fr minmax(2rem,auto) 1fr;
-    align-items: center;
-    justify-items: start;
-  }
-
-  .slider {
-  -webkit-appearance: none;
-  width: 15rem;
-  height: 0.5rem;
-  border-radius: 5px; 
-  border: 1px solid var(--theme-col);
-  background: white;
-  padding: 0;
-}
-
-.slider::-webkit-slider-thumb {
-  appearance: none;
-  width: 1.2rem;
-  height: 1.2rem;
-  border-radius: 50%; 
-  background: var(--theme-col-text);
-  cursor: pointer;
-}
 
 
 </style>
