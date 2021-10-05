@@ -39,16 +39,16 @@ registerLayout(
         const x = r * Math.cos(theta);
         const y = r * Math.sin(theta);
 
-        // Position our child fragment.
+        // (8) Position our child fragment.
         fragment.inlineOffset = edges.inlineStart + x + (inlineSize - fragment.inlineSize) / 2;
         fragment.blockOffset = edges.blockStart + y + r;
 
-        // Determine the max fragment block size so far.
+        // (9) Determine the max fragment block size so far.
         maxBlockSize = Math.max(maxBlockSize, fragment.blockOffset);
         childFragments.push(fragment);
       }
 
-      // (3) Determine our "auto" block size.
+      // (10) Determine our "auto" block size.
       const autoBlockSize = maxBlockSize + size;
 
       // (4) Return our fragment.
