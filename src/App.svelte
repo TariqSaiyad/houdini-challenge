@@ -1,15 +1,18 @@
 <script>
-  import { fade, fly } from "svelte/transition";
-  import { emojis } from "./constants.js";
+  import { fade } from "svelte/transition";
   import Slider from "./components/Slider.svelte";
+  import { emojis } from "./constants.js";
 
-  if (!CSS.layoutWorklet) {
-    document.body.innerHTML("LayoutWorklet not supported by this browser");
+  let enabled = false;
+
+  if ("layoutWorklet" in CSS) {
+    async function init() {
+      await CSS.layoutWorklet.addModule("./build/circular.js");
+      enabled = true;
+    }
+    init();
+    console.log("layout script installed!");
   }
-  async function init() {
-    await CSS.layoutWorklet.addModule("./build/circular.js");
-  }
-  init();
 
   let num = 36;
   let angle = 0;
@@ -44,22 +47,30 @@
       bind:value={radius}
     />
   </form>
-  <section
-    id="container"
-    class="container"
-    style="--a:{angle}; --rad:{radius};"
-  >
-    {#each Array(num) as _, i}
-      <a
-        href="/"
-        in:fade={{ duration: 150 }}
-        out:fade={{ duration: 150 }}
-        class="item"
-        style="--col:{i * 10 + 'deg'}; --index:{i + 1};"
-        >{emojis[Math.floor(Math.random() * emojis.length)]}</a
-      >
-    {/each}
-  </section>
+  {#if !enabled}
+    <strong>
+      Layoutworklet not available. To enable, turn on the following:
+      <code>“Experimental Web Platform features” on chrome://flags.</code>
+    </strong>
+  {/if}
+  {#if enabled}
+    <section
+      id="container"
+      class="container"
+      style="--a:{angle}; --rad:{radius};"
+    >
+      {#each Array(num) as _, i}
+        <a
+          href="/"
+          in:fade={{ duration: 150 }}
+          out:fade={{ duration: 150 }}
+          class="item"
+          style="--col:{i * 10 + 'deg'}; --index:{i + 1};"
+          >{emojis[Math.floor(Math.random() * emojis.length)]}</a
+        >
+      {/each}
+    </section>
+  {/if}
 </main>
 
 <style>
@@ -72,7 +83,7 @@
 
   main {
     text-align: center;
-    padding: 1rem;
+    padding: 1rem 1rem 4rem 1rem;
 	background-color: #FBEFF5;
 	border: 1rem solid #d67ab1;
 	border-radius: 2rem;

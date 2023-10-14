@@ -63,6 +63,12 @@ var app = (function () {
             }
         };
     }
+
+    const globals = (typeof window !== 'undefined'
+        ? window
+        : typeof globalThis !== 'undefined'
+            ? globalThis
+            : global);
     function append(target, node) {
         target.appendChild(node);
     }
@@ -78,16 +84,19 @@ var app = (function () {
     function append_empty_stylesheet(node) {
         const style_element = element('style');
         append_stylesheet(get_root_for_style(node), style_element);
-        return style_element;
+        return style_element.sheet;
     }
     function append_stylesheet(node, style) {
         append(node.head || node, style);
+        return style.sheet;
     }
     function insert(target, node, anchor) {
         target.insertBefore(node, anchor || null);
     }
     function detach(node) {
-        node.parentNode.removeChild(node);
+        if (node.parentNode) {
+            node.parentNode.removeChild(node);
+        }
     }
     function destroy_each(iterations, detaching) {
         for (let i = 0; i < iterations.length; i += 1) {
@@ -124,15 +133,22 @@ var app = (function () {
         input.value = value == null ? '' : value;
     }
     function set_style(node, key, value, important) {
-        node.style.setProperty(key, value, important ? 'important' : '');
+        if (value == null) {
+            node.style.removeProperty(key);
+        }
+        else {
+            node.style.setProperty(key, value, important ? 'important' : '');
+        }
     }
-    function custom_event(type, detail, bubbles = false) {
+    function custom_event(type, detail, { bubbles = false, cancelable = false } = {}) {
         const e = document.createEvent('CustomEvent');
-        e.initCustomEvent(type, bubbles, false, detail);
+        e.initCustomEvent(type, bubbles, cancelable, detail);
         return e;
     }
 
-    const active_docs = new Set();
+    // we need to store the information for multiple documents because a Svelte application could also contain iframes
+    // https://github.com/sveltejs/svelte/issues/3624
+    const managed_styles = new Map();
     let active = 0;
     // https://github.com/darkskyapp/string-hash/blob/master/index.js
     function hash(str) {
@@ -141,6 +157,11 @@ var app = (function () {
         while (i--)
             hash = ((hash << 5) - hash) ^ str.charCodeAt(i);
         return hash >>> 0;
+    }
+    function create_style_information(doc, node) {
+        const info = { stylesheet: append_empty_stylesheet(node), rules: {} };
+        managed_styles.set(doc, info);
+        return info;
     }
     function create_rule(node, a, b, duration, delay, ease, fn, uid = 0) {
         const step = 16.666 / duration;
@@ -152,11 +173,9 @@ var app = (function () {
         const rule = keyframes + `100% {${fn(b, 1 - b)}}\n}`;
         const name = `__svelte_${hash(rule)}_${uid}`;
         const doc = get_root_for_style(node);
-        active_docs.add(doc);
-        const stylesheet = doc.__svelte_stylesheet || (doc.__svelte_stylesheet = append_empty_stylesheet(node).sheet);
-        const current_rules = doc.__svelte_rules || (doc.__svelte_rules = {});
-        if (!current_rules[name]) {
-            current_rules[name] = true;
+        const { stylesheet, rules } = managed_styles.get(doc) || create_style_information(doc, node);
+        if (!rules[name]) {
+            rules[name] = true;
             stylesheet.insertRule(`@keyframes ${name} ${rule}`, stylesheet.cssRules.length);
         }
         const animation = node.style.animation || '';
@@ -182,14 +201,13 @@ var app = (function () {
         raf(() => {
             if (active)
                 return;
-            active_docs.forEach(doc => {
-                const stylesheet = doc.__svelte_stylesheet;
-                let i = stylesheet.cssRules.length;
-                while (i--)
-                    stylesheet.deleteRule(i);
-                doc.__svelte_rules = {};
+            managed_styles.forEach(info => {
+                const { ownerNode } = info.stylesheet;
+                // there is no ownerNode if it runs on jsdom.
+                if (ownerNode)
+                    detach(ownerNode);
             });
-            active_docs.clear();
+            managed_styles.clear();
         });
     }
 
@@ -200,9 +218,9 @@ var app = (function () {
 
     const dirty_components = [];
     const binding_callbacks = [];
-    const render_callbacks = [];
+    let render_callbacks = [];
     const flush_callbacks = [];
-    const resolved_promise = Promise.resolve();
+    const resolved_promise = /* @__PURE__ */ Promise.resolve();
     let update_scheduled = false;
     function schedule_update() {
         if (!update_scheduled) {
@@ -216,22 +234,54 @@ var app = (function () {
     function add_flush_callback(fn) {
         flush_callbacks.push(fn);
     }
-    let flushing = false;
+    // flush() calls callbacks in this order:
+    // 1. All beforeUpdate callbacks, in order: parents before children
+    // 2. All bind:this callbacks, in reverse order: children before parents.
+    // 3. All afterUpdate callbacks, in order: parents before children. EXCEPT
+    //    for afterUpdates called during the initial onMount, which are called in
+    //    reverse order: children before parents.
+    // Since callbacks might update component values, which could trigger another
+    // call to flush(), the following steps guard against this:
+    // 1. During beforeUpdate, any updated components will be added to the
+    //    dirty_components array and will cause a reentrant call to flush(). Because
+    //    the flush index is kept outside the function, the reentrant call will pick
+    //    up where the earlier call left off and go through all dirty components. The
+    //    current_component value is saved and restored so that the reentrant call will
+    //    not interfere with the "parent" flush() call.
+    // 2. bind:this callbacks cannot trigger new flush() calls.
+    // 3. During afterUpdate, any updated components will NOT have their afterUpdate
+    //    callback called a second time; the seen_callbacks set, outside the flush()
+    //    function, guarantees this behavior.
     const seen_callbacks = new Set();
+    let flushidx = 0; // Do *not* move this inside the flush() function
     function flush() {
-        if (flushing)
+        // Do not reenter flush while dirty components are updated, as this can
+        // result in an infinite loop. Instead, let the inner flush handle it.
+        // Reentrancy is ok afterwards for bindings etc.
+        if (flushidx !== 0) {
             return;
-        flushing = true;
+        }
+        const saved_component = current_component;
         do {
             // first, call beforeUpdate functions
             // and update components
-            for (let i = 0; i < dirty_components.length; i += 1) {
-                const component = dirty_components[i];
-                set_current_component(component);
-                update(component.$$);
+            try {
+                while (flushidx < dirty_components.length) {
+                    const component = dirty_components[flushidx];
+                    flushidx++;
+                    set_current_component(component);
+                    update(component.$$);
+                }
+            }
+            catch (e) {
+                // reset dirty state to not end up in a deadlocked state and then rethrow
+                dirty_components.length = 0;
+                flushidx = 0;
+                throw e;
             }
             set_current_component(null);
             dirty_components.length = 0;
+            flushidx = 0;
             while (binding_callbacks.length)
                 binding_callbacks.pop()();
             // then, once components are updated, call
@@ -251,8 +301,8 @@ var app = (function () {
             flush_callbacks.pop()();
         }
         update_scheduled = false;
-        flushing = false;
         seen_callbacks.clear();
+        set_current_component(saved_component);
     }
     function update($$) {
         if ($$.fragment !== null) {
@@ -263,6 +313,16 @@ var app = (function () {
             $$.fragment && $$.fragment.p($$.ctx, dirty);
             $$.after_update.forEach(add_render_callback);
         }
+    }
+    /**
+     * Useful for example to execute remaining `afterUpdate` callbacks before executing `destroy`.
+     */
+    function flush_render_callbacks(fns) {
+        const filtered = [];
+        const targets = [];
+        render_callbacks.forEach((c) => fns.indexOf(c) === -1 ? filtered.push(c) : targets.push(c));
+        targets.forEach((c) => c());
+        render_callbacks = filtered;
     }
 
     let promise;
@@ -314,10 +374,14 @@ var app = (function () {
             });
             block.o(local);
         }
+        else if (callback) {
+            callback();
+        }
     }
     const null_transition = { duration: 0 };
     function create_in_transition(node, fn, params) {
-        let config = fn(node, params);
+        const options = { direction: 'in' };
+        let config = fn(node, params, options);
         let running = false;
         let animation_name;
         let task;
@@ -361,7 +425,7 @@ var app = (function () {
                 started = true;
                 delete_rule(node);
                 if (is_function(config)) {
-                    config = config();
+                    config = config(options);
                     wait().then(go);
                 }
                 else {
@@ -380,7 +444,8 @@ var app = (function () {
         };
     }
     function create_out_transition(node, fn, params) {
-        let config = fn(node, params);
+        const options = { direction: 'out' };
+        let config = fn(node, params, options);
         let running = true;
         let animation_name;
         const group = outros;
@@ -415,7 +480,7 @@ var app = (function () {
         if (is_function(config)) {
             wait().then(() => {
                 // @ts-ignore
-                config = config();
+                config = config(options);
                 go();
             });
         }
@@ -447,14 +512,17 @@ var app = (function () {
         block && block.c();
     }
     function mount_component(component, target, anchor, customElement) {
-        const { fragment, on_mount, on_destroy, after_update } = component.$$;
+        const { fragment, after_update } = component.$$;
         fragment && fragment.m(target, anchor);
         if (!customElement) {
             // onMount happens before the initial afterUpdate
             add_render_callback(() => {
-                const new_on_destroy = on_mount.map(run).filter(is_function);
-                if (on_destroy) {
-                    on_destroy.push(...new_on_destroy);
+                const new_on_destroy = component.$$.on_mount.map(run).filter(is_function);
+                // if the component was destroyed immediately
+                // it will update the `$$.on_destroy` reference to `null`.
+                // the destructured on_destroy may still reference to the old array
+                if (component.$$.on_destroy) {
+                    component.$$.on_destroy.push(...new_on_destroy);
                 }
                 else {
                     // Edge case - component was destroyed immediately,
@@ -469,6 +537,7 @@ var app = (function () {
     function destroy_component(component, detaching) {
         const $$ = component.$$;
         if ($$.fragment !== null) {
+            flush_render_callbacks($$.after_update);
             run_all($$.on_destroy);
             $$.fragment && $$.fragment.d(detaching);
             // TODO null out other refs, including component.$$ (but need to
@@ -485,12 +554,12 @@ var app = (function () {
         }
         component.$$.dirty[(i / 31) | 0] |= (1 << (i % 31));
     }
-    function init$1(component, options, instance, create_fragment, not_equal, props, append_styles, dirty = [-1]) {
+    function init(component, options, instance, create_fragment, not_equal, props, append_styles, dirty = [-1]) {
         const parent_component = current_component;
         set_current_component(component);
         const $$ = component.$$ = {
             fragment: null,
-            ctx: null,
+            ctx: [],
             // state
             props,
             update: noop,
@@ -555,6 +624,9 @@ var app = (function () {
             this.$destroy = noop;
         }
         $on(type, callback) {
+            if (!is_function(callback)) {
+                return noop;
+            }
             const callbacks = (this.$$.callbacks[type] || (this.$$.callbacks[type] = []));
             callbacks.push(callback);
             return () => {
@@ -573,7 +645,7 @@ var app = (function () {
     }
 
     function dispatch_dev(type, detail) {
-        document.dispatchEvent(custom_event(type, Object.assign({ version: '3.43.0' }, detail), true));
+        document.dispatchEvent(custom_event(type, Object.assign({ version: '3.59.2' }, detail), { bubbles: true }));
     }
     function append_dev(target, node) {
         dispatch_dev('SvelteDOMInsert', { target, node });
@@ -587,12 +659,14 @@ var app = (function () {
         dispatch_dev('SvelteDOMRemove', { node });
         detach(node);
     }
-    function listen_dev(node, event, handler, options, has_prevent_default, has_stop_propagation) {
+    function listen_dev(node, event, handler, options, has_prevent_default, has_stop_propagation, has_stop_immediate_propagation) {
         const modifiers = options === true ? ['capture'] : options ? Array.from(Object.keys(options)) : [];
         if (has_prevent_default)
             modifiers.push('preventDefault');
         if (has_stop_propagation)
             modifiers.push('stopPropagation');
+        if (has_stop_immediate_propagation)
+            modifiers.push('stopImmediatePropagation');
         dispatch_dev('SvelteDOMAddEventListener', { node, event, handler, modifiers });
         const dispose = listen(node, event, handler, options);
         return () => {
@@ -609,7 +683,7 @@ var app = (function () {
     }
     function set_data_dev(text, data) {
         data = '' + data;
-        if (text.wholeText === data)
+        if (text.data === data)
             return;
         dispatch_dev('SvelteDOMSetData', { node: text, data });
         text.data = data;
@@ -650,11 +724,6 @@ var app = (function () {
         $inject_state() { }
     }
 
-    function cubicOut(t) {
-        const f = t - 1.0;
-        return f * f * f + 1.0;
-    }
-
     function fade(node, { delay = 0, duration = 400, easing = identity } = {}) {
         const o = +getComputedStyle(node).opacity;
         return {
@@ -664,26 +733,8 @@ var app = (function () {
             css: t => `opacity: ${t * o}`
         };
     }
-    function fly(node, { delay = 0, duration = 400, easing = cubicOut, x = 0, y = 0, opacity = 0 } = {}) {
-        const style = getComputedStyle(node);
-        const target_opacity = +style.opacity;
-        const transform = style.transform === 'none' ? '' : style.transform;
-        const od = target_opacity * (1 - opacity);
-        return {
-            delay,
-            duration,
-            easing,
-            css: (t, u) => `
-			transform: ${transform} translate(${(1 - t) * x}px, ${(1 - t) * y}px);
-			opacity: ${target_opacity - (od * u)}`
-        };
-    }
 
-    const emojis = [
-    	'😄','😃','😀','😊','☺','😉','😍','😘','😚','😗','😙','😜','😝','😛','😳','😁','😔','😌','😒','😞','😣','😢','😂','😭','😪','😥','😰','😅','😓','😩','😫','😨','😱','😠','😡','😤','😖','😆','😋','😷','😎','😴','😵','😲','😟','😦','😧','😈','👿','😮','😬','😐','😕','😯','😶','😇','😏','😑','👲','👳','👮','👷','💂','👶','👦','👧','👨','👩','👴','👵','👱','👼','👸','😺','😸','😻','😽','😼','🙀','😿','😹','😾','👹','👺','🙈','🙉','🙊','💀','👽','💩','🔥','✨','🌟','💫','💥','💢','💦','💧','💤','💨','👂','👀','👃','👅','👄','👍','👎','👌','👊','✊','✌','👋','✋','👐','👆','👇','👉','👈','🙌','🙏','☝','👏','💪','🚶','🏃','💃','👫','👪','👬','👭','💏','💑','👯','🙆','🙅','💁','🙋','💆','💇','💅','👰','🙎','🙍','🙇','🎩','👑','👒','👟','👞','👡','👠','👢','👕','👔','👚','👗','🎽','👖','👘','👙','💼','👜','👝','👛','👓','🎀','🌂','💄','💛','💙','💜','💚','❤','💔','💗','💓','💕','💖','💞','💘','💌','💋','💍','💎','👤','👥','💬','👣','💭','🐶','🐺','🐱','🐭','🐹','🐰','🐸','🐯','🐨','🐻','🐷','🐽','🐮','🐗','🐵','🐒','🐴','🐑','🐘','🐼','🐧','🐦','🐤','🐥','🐣','🐔','🐍','🐢','🐛','🐝','🐜','🐞','🐌','🐙','🐚','🐠','🐟','🐬','🐳','🐋','🐄','🐏','🐀','🐃','🐅','🐇','🐉','🐎','🐐','🐓','🐕','🐖','🐁','🐂','🐲','🐡','🐊','🐫','🐪','🐆','🐈','🐩','🐾','💐','🌸','🌷','🍀','🌹','🌻','🌺','🍁','🍃','🍂','🌿','🌾','🍄','🌵','🌴','🌲','🌳','🌰','🌱','🌼','🌐','🌞','🌝','🌚','🌑','🌒','🌓','🌔','🌕','🌖','🌗','🌘','🌜','🌛','🌙','🌍','🌎','🌏','🌋','🌌','🌠','⭐','☀','⛅','☁','⚡','☔','❄','⛄','🌀','🌁','🌈','🌊','🎍','💝','🎎','🎒','🎓','🎏','🎆','🎇','🎐','🎑','🎃','👻','🎅','🎄','🎁','🎋','🎉','🎊','🎈','🎌','🔮','🎥','📷','📹','📼','💿','📀','💽','💾','💻','📱','☎','📞','📟','📠','📡','📺','📻','🔊','🔉','🔈','🔇','🔔','🔕','📢','📣','⏳','⌛','⏰','⌚','🔓','🔒','🔏','🔐','🔑','🔎','💡','🔦','🔆','🔅','🔌','🔋','🔍','🛁','🛀','🚿','🚽','🔧','🔩','🔨','🚪','🚬','💣','🔫','🔪','💊','💉','💰','💴','💵','💷','💶','💳','💸','📲','📧','📥','📤','✉','📩','📨','📯','📫','📪','📬','📭','📮','📦','📝','📄','📃','📑','📊','📈','📉','📜','📋','📅','📆','📇','📁','📂','✂','📌','📎','✒','✏','📏','📐','📕','📗','📘','📙','📓','📔','📒','📚','📖','🔖','📛','🔬','🔭','📰','🎨','🎬','🎤','🎧','🎼','🎵','🎶','🎹','🎻','🎺','🎷','🎸','👾','🎮','🃏','🎴','🀄','🎲','🎯','🏈','🏀','⚽','⚾','🎾','🎱','🏉','🎳','⛳','🚵','🚴','🏁','🏇','🏆','🎿','🏂','🏊','🏄','🎣','☕','🍵','🍶','🍼','🍺','🍻','🍸','🍹','🍷','🍴','🍕','🍔','🍟','🍗','🍖','🍝','🍛','🍤','🍱','🍣','🍥','🍙','🍘','🍚','🍜','🍲','🍢','🍡','🍳','🍞','🍩','🍮','🍦','🍨','🍧','🎂','🍰','🍪','🍫','🍬','🍭','🍯','🍎','🍏','🍊','🍋','🍒','🍇','🍉','🍓','🍑','🍈','🍌','🍐','🍍','🍠','🍆','🍅','🌽','🏠','🏡','🏫','🏢','🏣','🏥','🏦','🏪','🏩','🏨','💒','⛪','🏬','🏤','🌇','🌆','🏯','🏰','⛺','🏭','🗼','🗾','🗻','🌄','🌅','🌃','🗽','🌉','🎠','🎡','⛲','🎢','🚢','⛵','🚤','🚣','⚓','🚀','✈','💺','🚁','🚂','🚊','🚉','🚞','🚆','🚄','🚅','🚈','🚇','🚝','🚋','🚃','🚎','🚌','🚍','🚙','🚘','🚗','🚕','🚖','🚛','🚚','🚨','🚓','🚔','🚒','🚑','🚐','🚲','🚡','🚟','🚠','🚜','💈','🚏','🎫','🚦','🚥','⚠','🚧','🔰','⛽','🏮','🎰','♨','🗿','🎪','🎭','📍','🚩','⬆','⬇','⬅','➡','🔠','🔡','🔤','↗','↖','↘','↙','↔','↕','🔄','◀','▶','🔼','🔽','↩','↪','ℹ','⏪','⏩','⏫','⏬','⤵','⤴','🆗','🔀','🔁','🔂','🆕','🆙','🆒','🆓','🆖','📶','🎦','🈁','🈯','🈳','🈵','🈴','🈲','🉐','🈹','🈺','🈶','🈚','🚻','🚹','🚺','🚼','🚾','🚰','🚮','🅿','♿','🚭','🈷','🈸','🈂','Ⓜ','🛂','🛄','🛅','🛃','🉑','㊙','㊗','🆑','🆘','🆔','🚫','🔞','📵','🚯','🚱','🚳','🚷','🚸','⛔','✳','❇','❎','✅','✴','💟','🆚','📳','📴','🅰','🅱','🆎','🅾','💠','➿','♻','♈','♉','♊','♋','♌','♍','♎','♏','♐','♑','♒','♓','⛎','🔯','🏧','💹','💲','💱','©','®','™','〽','〰','🔝','🔚','🔙','🔛','🔜','❌','⭕','❗','❓','❕','❔','🔃','🕛','🕧','🕐','🕜','🕑','🕝','🕒','🕞','🕓','🕟','🕔','🕠','🕕','🕖','🕗','🕘','🕙','🕚','🕡','🕢','🕣','🕤','🕥','🕦','✖','➕','➖','➗','♠','♥','♣','♦','💮','💯','✔','☑','🔘','🔗','➰','🔱','🔲','🔳','◼','◻','◾','◽','▪','▫','🔺','⬜','⬛','⚫','⚪','🔴','🔵','🔻','🔶','🔷','🔸','🔹'
-    ];
-
-    /* src/components/Slider.svelte generated by Svelte v3.43.0 */
+    /* src/components/Slider.svelte generated by Svelte v3.59.2 */
 
     const file$1 = "src/components/Slider.svelte";
 
@@ -803,6 +854,33 @@ var app = (function () {
     	let { $$slots: slots = {}, $$scope } = $$props;
     	validate_slots('Slider', slots, []);
     	let { id, name, min, max, step, value } = $$props;
+
+    	$$self.$$.on_mount.push(function () {
+    		if (id === undefined && !('id' in $$props || $$self.$$.bound[$$self.$$.props['id']])) {
+    			console.warn("<Slider> was created without expected prop 'id'");
+    		}
+
+    		if (name === undefined && !('name' in $$props || $$self.$$.bound[$$self.$$.props['name']])) {
+    			console.warn("<Slider> was created without expected prop 'name'");
+    		}
+
+    		if (min === undefined && !('min' in $$props || $$self.$$.bound[$$self.$$.props['min']])) {
+    			console.warn("<Slider> was created without expected prop 'min'");
+    		}
+
+    		if (max === undefined && !('max' in $$props || $$self.$$.bound[$$self.$$.props['max']])) {
+    			console.warn("<Slider> was created without expected prop 'max'");
+    		}
+
+    		if (step === undefined && !('step' in $$props || $$self.$$.bound[$$self.$$.props['step']])) {
+    			console.warn("<Slider> was created without expected prop 'step'");
+    		}
+
+    		if (value === undefined && !('value' in $$props || $$self.$$.bound[$$self.$$.props['value']])) {
+    			console.warn("<Slider> was created without expected prop 'value'");
+    		}
+    	});
+
     	const writable_props = ['id', 'name', 'min', 'max', 'step', 'value'];
 
     	Object.keys($$props).forEach(key => {
@@ -845,7 +923,7 @@ var app = (function () {
     	constructor(options) {
     		super(options);
 
-    		init$1(this, options, instance$1, create_fragment$1, safe_not_equal, {
+    		init(this, options, instance$1, create_fragment$1, safe_not_equal, {
     			id: 1,
     			name: 2,
     			min: 3,
@@ -860,33 +938,6 @@ var app = (function () {
     			options,
     			id: create_fragment$1.name
     		});
-
-    		const { ctx } = this.$$;
-    		const props = options.props || {};
-
-    		if (/*id*/ ctx[1] === undefined && !('id' in props)) {
-    			console.warn("<Slider> was created without expected prop 'id'");
-    		}
-
-    		if (/*name*/ ctx[2] === undefined && !('name' in props)) {
-    			console.warn("<Slider> was created without expected prop 'name'");
-    		}
-
-    		if (/*min*/ ctx[3] === undefined && !('min' in props)) {
-    			console.warn("<Slider> was created without expected prop 'min'");
-    		}
-
-    		if (/*max*/ ctx[4] === undefined && !('max' in props)) {
-    			console.warn("<Slider> was created without expected prop 'max'");
-    		}
-
-    		if (/*step*/ ctx[5] === undefined && !('step' in props)) {
-    			console.warn("<Slider> was created without expected prop 'step'");
-    		}
-
-    		if (/*value*/ ctx[0] === undefined && !('value' in props)) {
-    			console.warn("<Slider> was created without expected prop 'value'");
-    		}
     	}
 
     	get id() {
@@ -938,145 +989,63 @@ var app = (function () {
     	}
     }
 
-    /* src/App.svelte generated by Svelte v3.43.0 */
+    const emojis = [
+    	'😄','😃','😀','😊','☺','😉','😍','😘','😚','😗','😙','😜','😝','😛','😳','😁','😔','😌','😒','😞','😣','😢','😂','😭','😪','😥','😰','😅','😓','😩','😫','😨','😱','😠','😡','😤','😖','😆','😋','😷','😎','😴','😵','😲','😟','😦','😧','😈','👿','😮','😬','😐','😕','😯','😶','😇','😏','😑','👲','👳','👮','👷','💂','👶','👦','👧','👨','👩','👴','👵','👱','👼','👸','😺','😸','😻','😽','😼','🙀','😿','😹','😾','👹','👺','🙈','🙉','🙊','💀','👽','💩','🔥','✨','🌟','💫','💥','💢','💦','💧','💤','💨','👂','👀','👃','👅','👄','👍','👎','👌','👊','✊','✌','👋','✋','👐','👆','👇','👉','👈','🙌','🙏','☝','👏','💪','🚶','🏃','💃','👫','👪','👬','👭','💏','💑','👯','🙆','🙅','💁','🙋','💆','💇','💅','👰','🙎','🙍','🙇','🎩','👑','👒','👟','👞','👡','👠','👢','👕','👔','👚','👗','🎽','👖','👘','👙','💼','👜','👝','👛','👓','🎀','🌂','💄','💛','💙','💜','💚','❤','💔','💗','💓','💕','💖','💞','💘','💌','💋','💍','💎','👤','👥','💬','👣','💭','🐶','🐺','🐱','🐭','🐹','🐰','🐸','🐯','🐨','🐻','🐷','🐽','🐮','🐗','🐵','🐒','🐴','🐑','🐘','🐼','🐧','🐦','🐤','🐥','🐣','🐔','🐍','🐢','🐛','🐝','🐜','🐞','🐌','🐙','🐚','🐠','🐟','🐬','🐳','🐋','🐄','🐏','🐀','🐃','🐅','🐇','🐉','🐎','🐐','🐓','🐕','🐖','🐁','🐂','🐲','🐡','🐊','🐫','🐪','🐆','🐈','🐩','🐾','💐','🌸','🌷','🍀','🌹','🌻','🌺','🍁','🍃','🍂','🌿','🌾','🍄','🌵','🌴','🌲','🌳','🌰','🌱','🌼','🌐','🌞','🌝','🌚','🌑','🌒','🌓','🌔','🌕','🌖','🌗','🌘','🌜','🌛','🌙','🌍','🌎','🌏','🌋','🌌','🌠','⭐','☀','⛅','☁','⚡','☔','❄','⛄','🌀','🌁','🌈','🌊','🎍','💝','🎎','🎒','🎓','🎏','🎆','🎇','🎐','🎑','🎃','👻','🎅','🎄','🎁','🎋','🎉','🎊','🎈','🎌','🔮','🎥','📷','📹','📼','💿','📀','💽','💾','💻','📱','☎','📞','📟','📠','📡','📺','📻','🔊','🔉','🔈','🔇','🔔','🔕','📢','📣','⏳','⌛','⏰','⌚','🔓','🔒','🔏','🔐','🔑','🔎','💡','🔦','🔆','🔅','🔌','🔋','🔍','🛁','🛀','🚿','🚽','🔧','🔩','🔨','🚪','🚬','💣','🔫','🔪','💊','💉','💰','💴','💵','💷','💶','💳','💸','📲','📧','📥','📤','✉','📩','📨','📯','📫','📪','📬','📭','📮','📦','📝','📄','📃','📑','📊','📈','📉','📜','📋','📅','📆','📇','📁','📂','✂','📌','📎','✒','✏','📏','📐','📕','📗','📘','📙','📓','📔','📒','📚','📖','🔖','📛','🔬','🔭','📰','🎨','🎬','🎤','🎧','🎼','🎵','🎶','🎹','🎻','🎺','🎷','🎸','👾','🎮','🃏','🎴','🀄','🎲','🎯','🏈','🏀','⚽','⚾','🎾','🎱','🏉','🎳','⛳','🚵','🚴','🏁','🏇','🏆','🎿','🏂','🏊','🏄','🎣','☕','🍵','🍶','🍼','🍺','🍻','🍸','🍹','🍷','🍴','🍕','🍔','🍟','🍗','🍖','🍝','🍛','🍤','🍱','🍣','🍥','🍙','🍘','🍚','🍜','🍲','🍢','🍡','🍳','🍞','🍩','🍮','🍦','🍨','🍧','🎂','🍰','🍪','🍫','🍬','🍭','🍯','🍎','🍏','🍊','🍋','🍒','🍇','🍉','🍓','🍑','🍈','🍌','🍐','🍍','🍠','🍆','🍅','🌽','🏠','🏡','🏫','🏢','🏣','🏥','🏦','🏪','🏩','🏨','💒','⛪','🏬','🏤','🌇','🌆','🏯','🏰','⛺','🏭','🗼','🗾','🗻','🌄','🌅','🌃','🗽','🌉','🎠','🎡','⛲','🎢','🚢','⛵','🚤','🚣','⚓','🚀','✈','💺','🚁','🚂','🚊','🚉','🚞','🚆','🚄','🚅','🚈','🚇','🚝','🚋','🚃','🚎','🚌','🚍','🚙','🚘','🚗','🚕','🚖','🚛','🚚','🚨','🚓','🚔','🚒','🚑','🚐','🚲','🚡','🚟','🚠','🚜','💈','🚏','🎫','🚦','🚥','⚠','🚧','🔰','⛽','🏮','🎰','♨','🗿','🎪','🎭','📍','🚩','⬆','⬇','⬅','➡','🔠','🔡','🔤','↗','↖','↘','↙','↔','↕','🔄','◀','▶','🔼','🔽','↩','↪','ℹ','⏪','⏩','⏫','⏬','⤵','⤴','🆗','🔀','🔁','🔂','🆕','🆙','🆒','🆓','🆖','📶','🎦','🈁','🈯','🈳','🈵','🈴','🈲','🉐','🈹','🈺','🈶','🈚','🚻','🚹','🚺','🚼','🚾','🚰','🚮','🅿','♿','🚭','🈷','🈸','🈂','Ⓜ','🛂','🛄','🛅','🛃','🉑','㊙','㊗','🆑','🆘','🆔','🚫','🔞','📵','🚯','🚱','🚳','🚷','🚸','⛔','✳','❇','❎','✅','✴','💟','🆚','📳','📴','🅰','🅱','🆎','🅾','💠','➿','♻','♈','♉','♊','♋','♌','♍','♎','♏','♐','♑','♒','♓','⛎','🔯','🏧','💹','💲','💱','©','®','™','〽','〰','🔝','🔚','🔙','🔛','🔜','❌','⭕','❗','❓','❕','❔','🔃','🕛','🕧','🕐','🕜','🕑','🕝','🕒','🕞','🕓','🕟','🕔','🕠','🕕','🕖','🕗','🕘','🕙','🕚','🕡','🕢','🕣','🕤','🕥','🕦','✖','➕','➖','➗','♠','♥','♣','♦','💮','💯','✔','☑','🔘','🔗','➰','🔱','🔲','🔳','◼','◻','◾','◽','▪','▫','🔺','⬜','⬛','⚫','⚪','🔴','🔵','🔻','🔶','🔷','🔸','🔹'
+    ];
+
+    /* src/App.svelte generated by Svelte v3.59.2 */
+
+    const { console: console_1 } = globals;
     const file = "src/App.svelte";
 
     function get_each_context(ctx, list, i) {
     	const child_ctx = ctx.slice();
-    	child_ctx[6] = list[i];
-    	child_ctx[8] = i;
+    	child_ctx[7] = list[i];
+    	child_ctx[9] = i;
     	return child_ctx;
     }
 
-    // (52:4) {#each Array(num) as _, i}
-    function create_each_block(ctx) {
-    	let a;
-    	let a_intro;
-    	let a_outro;
-    	let current;
+    // (50:2) {#if !enabled}
+    function create_if_block_1(ctx) {
+    	let strong;
+    	let t0;
+    	let code;
 
     	const block = {
     		c: function create() {
-    			a = element("a");
-    			a.textContent = `${emojis[Math.floor(Math.random() * emojis.length)]}`;
-    			attr_dev(a, "href", "/");
-    			attr_dev(a, "class", "item svelte-1l9u712");
-    			set_style(a, "--col", /*i*/ ctx[8] * 10 + 'deg');
-    			set_style(a, "--index", /*i*/ ctx[8] + 1);
-    			add_location(a, file, 52, 6, 1024);
+    			strong = element("strong");
+    			t0 = text("Layoutworklet not available. To enable, turn on the following:\n      ");
+    			code = element("code");
+    			code.textContent = "“Experimental Web Platform features” on chrome://flags.";
+    			add_location(code, file, 52, 6, 1017);
+    			add_location(strong, file, 50, 4, 933);
     		},
     		m: function mount(target, anchor) {
-    			insert_dev(target, a, anchor);
-    			current = true;
-    		},
-    		p: noop,
-    		i: function intro(local) {
-    			if (current) return;
-
-    			add_render_callback(() => {
-    				if (a_outro) a_outro.end(1);
-    				a_intro = create_in_transition(a, fade, { duration: 150 });
-    				a_intro.start();
-    			});
-
-    			current = true;
-    		},
-    		o: function outro(local) {
-    			if (a_intro) a_intro.invalidate();
-    			a_outro = create_out_transition(a, fade, { duration: 150 });
-    			current = false;
+    			insert_dev(target, strong, anchor);
+    			append_dev(strong, t0);
+    			append_dev(strong, code);
     		},
     		d: function destroy(detaching) {
-    			if (detaching) detach_dev(a);
-    			if (detaching && a_outro) a_outro.end();
+    			if (detaching) detach_dev(strong);
     		}
     	};
 
     	dispatch_dev("SvelteRegisterBlock", {
     		block,
-    		id: create_each_block.name,
-    		type: "each",
-    		source: "(52:4) {#each Array(num) as _, i}",
+    		id: create_if_block_1.name,
+    		type: "if",
+    		source: "(50:2) {#if !enabled}",
     		ctx
     	});
 
     	return block;
     }
 
-    function create_fragment(ctx) {
-    	let main;
-    	let h1;
-    	let t1;
-    	let form;
-    	let slider0;
-    	let updating_value;
-    	let t2;
-    	let slider1;
-    	let updating_value_1;
-    	let t3;
-    	let slider2;
-    	let updating_value_2;
-    	let t4;
+    // (56:2) {#if enabled}
+    function create_if_block(ctx) {
     	let section;
     	let current;
-
-    	function slider0_value_binding(value) {
-    		/*slider0_value_binding*/ ctx[3](value);
-    	}
-
-    	let slider0_props = {
-    		id: "itemInput",
-    		name: "Items",
-    		min: "1",
-    		max: "36",
-    		step: "1"
-    	};
-
-    	if (/*num*/ ctx[0] !== void 0) {
-    		slider0_props.value = /*num*/ ctx[0];
-    	}
-
-    	slider0 = new Slider({ props: slider0_props, $$inline: true });
-    	binding_callbacks.push(() => bind(slider0, 'value', slider0_value_binding));
-
-    	function slider1_value_binding(value) {
-    		/*slider1_value_binding*/ ctx[4](value);
-    	}
-
-    	let slider1_props = {
-    		id: "angleInput",
-    		name: "Angle",
-    		min: "0",
-    		max: "360",
-    		step: "1"
-    	};
-
-    	if (/*angle*/ ctx[1] !== void 0) {
-    		slider1_props.value = /*angle*/ ctx[1];
-    	}
-
-    	slider1 = new Slider({ props: slider1_props, $$inline: true });
-    	binding_callbacks.push(() => bind(slider1, 'value', slider1_value_binding));
-
-    	function slider2_value_binding(value) {
-    		/*slider2_value_binding*/ ctx[5](value);
-    	}
-
-    	let slider2_props = {
-    		id: "radiusInput",
-    		name: "Radius Scale",
-    		min: "0.5",
-    		max: "2",
-    		step: "0.1"
-    	};
-
-    	if (/*radius*/ ctx[2] !== void 0) {
-    		slider2_props.value = /*radius*/ ctx[2];
-    	}
-
-    	slider2 = new Slider({ props: slider2_props, $$inline: true });
-    	binding_callbacks.push(() => bind(slider2, 'value', slider2_value_binding));
-    	let each_value = Array(/*num*/ ctx[0]);
+    	let each_value = Array(/*num*/ ctx[1]);
     	validate_each_argument(each_value);
     	let each_blocks = [];
 
@@ -1090,88 +1059,32 @@ var app = (function () {
 
     	const block = {
     		c: function create() {
-    			main = element("main");
-    			h1 = element("h1");
-    			h1.textContent = "CSS Circular";
-    			t1 = space();
-    			form = element("form");
-    			create_component(slider0.$$.fragment);
-    			t2 = space();
-    			create_component(slider1.$$.fragment);
-    			t3 = space();
-    			create_component(slider2.$$.fragment);
-    			t4 = space();
     			section = element("section");
 
     			for (let i = 0; i < each_blocks.length; i += 1) {
     				each_blocks[i].c();
     			}
 
-    			attr_dev(h1, "class", "svelte-1l9u712");
-    			add_location(h1, file, 19, 2, 435);
-    			attr_dev(form, "class", "controls svelte-1l9u712");
-    			add_location(form, file, 20, 2, 459);
     			attr_dev(section, "id", "container");
-    			attr_dev(section, "class", "container svelte-1l9u712");
-    			set_style(section, "--a", /*angle*/ ctx[1]);
-    			set_style(section, "--rad", /*radius*/ ctx[2]);
-    			add_location(section, file, 46, 2, 892);
-    			attr_dev(main, "class", "svelte-1l9u712");
-    			add_location(main, file, 18, 0, 426);
-    		},
-    		l: function claim(nodes) {
-    			throw new Error("options.hydrate only works if the component was compiled with the `hydratable: true` option");
+    			attr_dev(section, "class", "container svelte-1520i8e");
+    			set_style(section, "--a", /*angle*/ ctx[2]);
+    			set_style(section, "--rad", /*radius*/ ctx[3]);
+    			add_location(section, file, 56, 4, 1128);
     		},
     		m: function mount(target, anchor) {
-    			insert_dev(target, main, anchor);
-    			append_dev(main, h1);
-    			append_dev(main, t1);
-    			append_dev(main, form);
-    			mount_component(slider0, form, null);
-    			append_dev(form, t2);
-    			mount_component(slider1, form, null);
-    			append_dev(form, t3);
-    			mount_component(slider2, form, null);
-    			append_dev(main, t4);
-    			append_dev(main, section);
+    			insert_dev(target, section, anchor);
 
     			for (let i = 0; i < each_blocks.length; i += 1) {
-    				each_blocks[i].m(section, null);
+    				if (each_blocks[i]) {
+    					each_blocks[i].m(section, null);
+    				}
     			}
 
     			current = true;
     		},
-    		p: function update(ctx, [dirty]) {
-    			const slider0_changes = {};
-
-    			if (!updating_value && dirty & /*num*/ 1) {
-    				updating_value = true;
-    				slider0_changes.value = /*num*/ ctx[0];
-    				add_flush_callback(() => updating_value = false);
-    			}
-
-    			slider0.$set(slider0_changes);
-    			const slider1_changes = {};
-
-    			if (!updating_value_1 && dirty & /*angle*/ 2) {
-    				updating_value_1 = true;
-    				slider1_changes.value = /*angle*/ ctx[1];
-    				add_flush_callback(() => updating_value_1 = false);
-    			}
-
-    			slider1.$set(slider1_changes);
-    			const slider2_changes = {};
-
-    			if (!updating_value_2 && dirty & /*radius*/ 4) {
-    				updating_value_2 = true;
-    				slider2_changes.value = /*radius*/ ctx[2];
-    				add_flush_callback(() => updating_value_2 = false);
-    			}
-
-    			slider2.$set(slider2_changes);
-
-    			if (dirty & /*emojis, Math, num*/ 1) {
-    				each_value = Array(/*num*/ ctx[0]);
+    		p: function update(ctx, dirty) {
+    			if (dirty & /*emojis, Math, num*/ 2) {
+    				each_value = Array(/*num*/ ctx[1]);
     				validate_each_argument(each_value);
     				let i;
 
@@ -1198,19 +1111,16 @@ var app = (function () {
     				check_outros();
     			}
 
-    			if (!current || dirty & /*angle*/ 2) {
-    				set_style(section, "--a", /*angle*/ ctx[1]);
+    			if (!current || dirty & /*angle*/ 4) {
+    				set_style(section, "--a", /*angle*/ ctx[2]);
     			}
 
-    			if (!current || dirty & /*radius*/ 4) {
-    				set_style(section, "--rad", /*radius*/ ctx[2]);
+    			if (!current || dirty & /*radius*/ 8) {
+    				set_style(section, "--rad", /*radius*/ ctx[3]);
     			}
     		},
     		i: function intro(local) {
     			if (current) return;
-    			transition_in(slider0.$$.fragment, local);
-    			transition_in(slider1.$$.fragment, local);
-    			transition_in(slider2.$$.fragment, local);
 
     			for (let i = 0; i < each_value.length; i += 1) {
     				transition_in(each_blocks[i]);
@@ -1219,9 +1129,6 @@ var app = (function () {
     			current = true;
     		},
     		o: function outro(local) {
-    			transition_out(slider0.$$.fragment, local);
-    			transition_out(slider1.$$.fragment, local);
-    			transition_out(slider2.$$.fragment, local);
     			each_blocks = each_blocks.filter(Boolean);
 
     			for (let i = 0; i < each_blocks.length; i += 1) {
@@ -1231,11 +1138,281 @@ var app = (function () {
     			current = false;
     		},
     		d: function destroy(detaching) {
+    			if (detaching) detach_dev(section);
+    			destroy_each(each_blocks, detaching);
+    		}
+    	};
+
+    	dispatch_dev("SvelteRegisterBlock", {
+    		block,
+    		id: create_if_block.name,
+    		type: "if",
+    		source: "(56:2) {#if enabled}",
+    		ctx
+    	});
+
+    	return block;
+    }
+
+    // (62:6) {#each Array(num) as _, i}
+    function create_each_block(ctx) {
+    	let a;
+    	let a_intro;
+    	let a_outro;
+    	let current;
+
+    	const block = {
+    		c: function create() {
+    			a = element("a");
+    			a.textContent = `${emojis[Math.floor(Math.random() * emojis.length)]}`;
+    			attr_dev(a, "href", "/");
+    			attr_dev(a, "class", "item svelte-1520i8e");
+    			set_style(a, "--col", /*i*/ ctx[9] * 10 + 'deg');
+    			set_style(a, "--index", /*i*/ ctx[9] + 1);
+    			add_location(a, file, 62, 8, 1272);
+    		},
+    		m: function mount(target, anchor) {
+    			insert_dev(target, a, anchor);
+    			current = true;
+    		},
+    		p: noop,
+    		i: function intro(local) {
+    			if (current) return;
+
+    			add_render_callback(() => {
+    				if (!current) return;
+    				if (a_outro) a_outro.end(1);
+    				a_intro = create_in_transition(a, fade, { duration: 150 });
+    				a_intro.start();
+    			});
+
+    			current = true;
+    		},
+    		o: function outro(local) {
+    			if (a_intro) a_intro.invalidate();
+    			a_outro = create_out_transition(a, fade, { duration: 150 });
+    			current = false;
+    		},
+    		d: function destroy(detaching) {
+    			if (detaching) detach_dev(a);
+    			if (detaching && a_outro) a_outro.end();
+    		}
+    	};
+
+    	dispatch_dev("SvelteRegisterBlock", {
+    		block,
+    		id: create_each_block.name,
+    		type: "each",
+    		source: "(62:6) {#each Array(num) as _, i}",
+    		ctx
+    	});
+
+    	return block;
+    }
+
+    function create_fragment(ctx) {
+    	let main;
+    	let h1;
+    	let t1;
+    	let form;
+    	let slider0;
+    	let updating_value;
+    	let t2;
+    	let slider1;
+    	let updating_value_1;
+    	let t3;
+    	let slider2;
+    	let updating_value_2;
+    	let t4;
+    	let t5;
+    	let current;
+
+    	function slider0_value_binding(value) {
+    		/*slider0_value_binding*/ ctx[4](value);
+    	}
+
+    	let slider0_props = {
+    		id: "itemInput",
+    		name: "Items",
+    		min: "1",
+    		max: "36",
+    		step: "1"
+    	};
+
+    	if (/*num*/ ctx[1] !== void 0) {
+    		slider0_props.value = /*num*/ ctx[1];
+    	}
+
+    	slider0 = new Slider({ props: slider0_props, $$inline: true });
+    	binding_callbacks.push(() => bind(slider0, 'value', slider0_value_binding));
+
+    	function slider1_value_binding(value) {
+    		/*slider1_value_binding*/ ctx[5](value);
+    	}
+
+    	let slider1_props = {
+    		id: "angleInput",
+    		name: "Angle",
+    		min: "0",
+    		max: "360",
+    		step: "1"
+    	};
+
+    	if (/*angle*/ ctx[2] !== void 0) {
+    		slider1_props.value = /*angle*/ ctx[2];
+    	}
+
+    	slider1 = new Slider({ props: slider1_props, $$inline: true });
+    	binding_callbacks.push(() => bind(slider1, 'value', slider1_value_binding));
+
+    	function slider2_value_binding(value) {
+    		/*slider2_value_binding*/ ctx[6](value);
+    	}
+
+    	let slider2_props = {
+    		id: "radiusInput",
+    		name: "Radius Scale",
+    		min: "0.5",
+    		max: "2",
+    		step: "0.1"
+    	};
+
+    	if (/*radius*/ ctx[3] !== void 0) {
+    		slider2_props.value = /*radius*/ ctx[3];
+    	}
+
+    	slider2 = new Slider({ props: slider2_props, $$inline: true });
+    	binding_callbacks.push(() => bind(slider2, 'value', slider2_value_binding));
+    	let if_block0 = !/*enabled*/ ctx[0] && create_if_block_1(ctx);
+    	let if_block1 = /*enabled*/ ctx[0] && create_if_block(ctx);
+
+    	const block = {
+    		c: function create() {
+    			main = element("main");
+    			h1 = element("h1");
+    			h1.textContent = "CSS Circular";
+    			t1 = space();
+    			form = element("form");
+    			create_component(slider0.$$.fragment);
+    			t2 = space();
+    			create_component(slider1.$$.fragment);
+    			t3 = space();
+    			create_component(slider2.$$.fragment);
+    			t4 = space();
+    			if (if_block0) if_block0.c();
+    			t5 = space();
+    			if (if_block1) if_block1.c();
+    			attr_dev(h1, "class", "svelte-1520i8e");
+    			add_location(h1, file, 22, 2, 457);
+    			attr_dev(form, "class", "controls svelte-1520i8e");
+    			add_location(form, file, 23, 2, 481);
+    			attr_dev(main, "class", "svelte-1520i8e");
+    			add_location(main, file, 21, 0, 448);
+    		},
+    		l: function claim(nodes) {
+    			throw new Error("options.hydrate only works if the component was compiled with the `hydratable: true` option");
+    		},
+    		m: function mount(target, anchor) {
+    			insert_dev(target, main, anchor);
+    			append_dev(main, h1);
+    			append_dev(main, t1);
+    			append_dev(main, form);
+    			mount_component(slider0, form, null);
+    			append_dev(form, t2);
+    			mount_component(slider1, form, null);
+    			append_dev(form, t3);
+    			mount_component(slider2, form, null);
+    			append_dev(main, t4);
+    			if (if_block0) if_block0.m(main, null);
+    			append_dev(main, t5);
+    			if (if_block1) if_block1.m(main, null);
+    			current = true;
+    		},
+    		p: function update(ctx, [dirty]) {
+    			const slider0_changes = {};
+
+    			if (!updating_value && dirty & /*num*/ 2) {
+    				updating_value = true;
+    				slider0_changes.value = /*num*/ ctx[1];
+    				add_flush_callback(() => updating_value = false);
+    			}
+
+    			slider0.$set(slider0_changes);
+    			const slider1_changes = {};
+
+    			if (!updating_value_1 && dirty & /*angle*/ 4) {
+    				updating_value_1 = true;
+    				slider1_changes.value = /*angle*/ ctx[2];
+    				add_flush_callback(() => updating_value_1 = false);
+    			}
+
+    			slider1.$set(slider1_changes);
+    			const slider2_changes = {};
+
+    			if (!updating_value_2 && dirty & /*radius*/ 8) {
+    				updating_value_2 = true;
+    				slider2_changes.value = /*radius*/ ctx[3];
+    				add_flush_callback(() => updating_value_2 = false);
+    			}
+
+    			slider2.$set(slider2_changes);
+
+    			if (!/*enabled*/ ctx[0]) {
+    				if (if_block0) ; else {
+    					if_block0 = create_if_block_1(ctx);
+    					if_block0.c();
+    					if_block0.m(main, t5);
+    				}
+    			} else if (if_block0) {
+    				if_block0.d(1);
+    				if_block0 = null;
+    			}
+
+    			if (/*enabled*/ ctx[0]) {
+    				if (if_block1) {
+    					if_block1.p(ctx, dirty);
+
+    					if (dirty & /*enabled*/ 1) {
+    						transition_in(if_block1, 1);
+    					}
+    				} else {
+    					if_block1 = create_if_block(ctx);
+    					if_block1.c();
+    					transition_in(if_block1, 1);
+    					if_block1.m(main, null);
+    				}
+    			} else if (if_block1) {
+    				group_outros();
+
+    				transition_out(if_block1, 1, 1, () => {
+    					if_block1 = null;
+    				});
+
+    				check_outros();
+    			}
+    		},
+    		i: function intro(local) {
+    			if (current) return;
+    			transition_in(slider0.$$.fragment, local);
+    			transition_in(slider1.$$.fragment, local);
+    			transition_in(slider2.$$.fragment, local);
+    			transition_in(if_block1);
+    			current = true;
+    		},
+    		o: function outro(local) {
+    			transition_out(slider0.$$.fragment, local);
+    			transition_out(slider1.$$.fragment, local);
+    			transition_out(slider2.$$.fragment, local);
+    			transition_out(if_block1);
+    			current = false;
+    		},
+    		d: function destroy(detaching) {
     			if (detaching) detach_dev(main);
     			destroy_component(slider0);
     			destroy_component(slider1);
     			destroy_component(slider2);
-    			destroy_each(each_blocks, detaching);
+    			if (if_block0) if_block0.d();
+    			if (if_block1) if_block1.d();
     		}
     	};
 
@@ -1250,58 +1427,60 @@ var app = (function () {
     	return block;
     }
 
-    async function init() {
-    	await CSS.layoutWorklet.addModule("./build/circular.js");
-    }
-
     function instance($$self, $$props, $$invalidate) {
     	let { $$slots: slots = {}, $$scope } = $$props;
     	validate_slots('App', slots, []);
+    	let enabled = false;
 
-    	if (!CSS.layoutWorklet) {
-    		document.body.innerHTML("LayoutWorklet not supported by this browser");
+    	if ("layoutWorklet" in CSS) {
+    		async function init() {
+    			await CSS.layoutWorklet.addModule("./build/circular.js");
+    			$$invalidate(0, enabled = true);
+    		}
+
+    		init();
+    		console.log("layout script installed!");
     	}
 
-    	init();
     	let num = 36;
     	let angle = 0;
     	let radius = 1;
     	const writable_props = [];
 
     	Object.keys($$props).forEach(key => {
-    		if (!~writable_props.indexOf(key) && key.slice(0, 2) !== '$$' && key !== 'slot') console.warn(`<App> was created with unknown prop '${key}'`);
+    		if (!~writable_props.indexOf(key) && key.slice(0, 2) !== '$$' && key !== 'slot') console_1.warn(`<App> was created with unknown prop '${key}'`);
     	});
 
     	function slider0_value_binding(value) {
     		num = value;
-    		$$invalidate(0, num);
+    		$$invalidate(1, num);
     	}
 
     	function slider1_value_binding(value) {
     		angle = value;
-    		$$invalidate(1, angle);
+    		$$invalidate(2, angle);
     	}
 
     	function slider2_value_binding(value) {
     		radius = value;
-    		$$invalidate(2, radius);
+    		$$invalidate(3, radius);
     	}
 
     	$$self.$capture_state = () => ({
     		fade,
-    		fly,
-    		emojis,
     		Slider,
-    		init,
+    		emojis,
+    		enabled,
     		num,
     		angle,
     		radius
     	});
 
     	$$self.$inject_state = $$props => {
-    		if ('num' in $$props) $$invalidate(0, num = $$props.num);
-    		if ('angle' in $$props) $$invalidate(1, angle = $$props.angle);
-    		if ('radius' in $$props) $$invalidate(2, radius = $$props.radius);
+    		if ('enabled' in $$props) $$invalidate(0, enabled = $$props.enabled);
+    		if ('num' in $$props) $$invalidate(1, num = $$props.num);
+    		if ('angle' in $$props) $$invalidate(2, angle = $$props.angle);
+    		if ('radius' in $$props) $$invalidate(3, radius = $$props.radius);
     	};
 
     	if ($$props && "$$inject" in $$props) {
@@ -1309,6 +1488,7 @@ var app = (function () {
     	}
 
     	return [
+    		enabled,
     		num,
     		angle,
     		radius,
@@ -1321,7 +1501,7 @@ var app = (function () {
     class App extends SvelteComponentDev {
     	constructor(options) {
     		super(options);
-    		init$1(this, options, instance, create_fragment, safe_not_equal, {});
+    		init(this, options, instance, create_fragment, safe_not_equal, {});
 
     		dispatch_dev("SvelteRegisterComponent", {
     			component: this,
